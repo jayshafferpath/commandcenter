@@ -1,0 +1,1037 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Surfaces — violet-tinted neutrals rather than flat gray, so the identity
+     color shows up in the structure, not just the accents. Each step is
+     deliberately a bigger jump than a generic dark-mode gray-ramp so columns,
+     cards, and insets stay legible as distinct layers. */
+  --bg: #0a0a0f;
+  --bg-raised: #16141e;
+  --bg-sunken: #0d0c13;
+  --bg-hover: #201d2b;
+  --border: #2b2738;
+  --border-strong: #3d3752;
+
+  /* Text */
+  --text: #e9e7f2;
+  --text-bright: #f5f3fb;
+  --text-muted: #9a93ac;
+  --text-dim: #5d5770;
+
+  /* Brand/identity — the one hue used for "this is Switchboard" and "this is
+     focused," not for ticket-state semantics. */
+  --accent: #b388ff;
+  --accent-dim: #8b5cf6;
+
+  /* Status tones. Values are brightened slightly to hold contrast against
+     the darker surfaces above. */
+  --blue: #6ea8fe;
+  --green: #3fd67a;
+  --green-strong: #1f9d4f;
+  --green-strong-hover: #27b85c;
+  --amber: #f0b429;
+  --red: #ff6b6b;
+  --red-strong: #e5484d;
+  --gray-dim: #5d5770;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.55); }
+  50% { box-shadow: 0 0 0 4px rgba(110, 168, 254, 0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.08s;
+}
+
+.btn:hover {
+  background: var(--border-strong);
+  border-color: var(--gray-dim);
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--green-strong);
+  border-color: var(--green-strong-hover);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  background: var(--green-strong-hover);
+}
+
+.loading,
+.error,
+.empty {
+  text-align: center;
+  padding: 48px;
+  color: var(--text-muted);
+}
+
+.error {
+  color: var(--red-strong);
+}
+
+.action-error {
+  font-size: 12px;
+  color: var(--red-strong);
+}
+
+/* --- Focus board layout --- */
+
+.focus-board {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 16px 24px;
+}
+
+.focus-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.focus-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pearl-button-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.pearl-toggle {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.pearl-toggle:hover:not(:disabled) {
+  background: rgba(179, 136, 255, 0.1);
+}
+
+.pearl-error-inline {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: 240px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-raised);
+  border: 1px solid var(--red);
+  color: var(--red);
+  font-size: 11px;
+  z-index: 20;
+}
+
+.focus-wordmark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.focus-wordmark-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.focus-columns {
+  display: grid;
+  /* Plain `1fr 1fr` still respects each track's content-based min-width
+     (auto), so a long unbroken ticket title can force this column wider
+     than its share — minmax(0, 1fr) overrides that to force an actual
+     even split regardless of content. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.focus-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Left grid cell: a tab bar above a single visible panel. All three tab
+   panels stay mounted (display:none when inactive) so switching tabs is
+   instant and doesn't restart that tab's own polling. */
+.focus-tabbed-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.focus-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.focus-tab {
+  padding: 8px 16px;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.focus-tab:hover {
+  color: var(--text);
+}
+
+.focus-tab--active {
+  background: var(--bg-raised);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-raised);
+  color: var(--text);
+}
+
+.focus-tab-panels {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.focus-tab-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.focus-tab-panel--hidden {
+  display: none;
+}
+
+.focus-tab-panel > .focus-column {
+  flex: 1;
+}
+
+/* Right grid cell: two stacked boxes — the session feed and, below it,
+   the dispatch input — instead of a single column. */
+.focus-column-sessions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.focus-column-sessions-stack > .focus-column {
+  flex: 1;
+}
+
+.focus-column-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  flex-shrink: 0;
+}
+
+.focus-column-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.focus-column-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.focus-column-live {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(110, 168, 254, 0.15);
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.focus-column-live--needs-input {
+  background: rgba(240, 180, 41, 0.15);
+  color: var(--amber);
+}
+
+.focus-column-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.focus-column-empty {
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.focus-column-error {
+  padding: 8px 14px;
+  color: var(--red);
+  font-size: 12px;
+}
+
+.focus-add-form {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.focus-add-input {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color 0.12s;
+}
+
+.focus-add-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.focus-add-form--todo {
+  display: flex;
+  gap: 6px;
+}
+
+.focus-add-due {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  transition: border-color 0.12s;
+}
+
+.focus-add-due:focus {
+  outline: none;
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Date inputs render their own calendar-picker glyph in whatever the UA's
+   default ink is; without this it's unreadable on a dark field. */
+.focus-add-due::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
+
+/* --- Shared focus-item (tickets + todos) --- */
+
+.focus-item {
+  margin-bottom: 2px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.focus-item-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: background 0.1s, transform 0.1s;
+}
+
+.focus-item-row:hover {
+  background: var(--bg-hover);
+  transform: translateX(2px);
+}
+
+.focus-item-key {
+  font-weight: 600;
+  color: var(--blue);
+  font-size: 12px;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.focus-item-key:hover {
+  text-decoration: underline;
+}
+
+.focus-item-summary {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.focus-item-status {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.focus-item-due {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.focus-item-due--overdue {
+  background: rgba(255, 107, 107, 0.12);
+  color: var(--red);
+}
+
+.focus-item-due--soon {
+  background: rgba(240, 180, 41, 0.12);
+  color: var(--amber);
+}
+
+.focus-item-due--future {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.focus-item-spawn-btn {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.focus-item-spawn-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.focus-item-checkbox {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+}
+
+.focus-item-checkbox:hover {
+  border-color: var(--green-strong);
+}
+
+/* --- Sessions --- */
+
+.session-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 4px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 6px;
+  transition: border-color 0.15s;
+}
+
+.session-row:hover {
+  border-color: var(--accent);
+}
+
+.session-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 10px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-row-main:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.session-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  margin-right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.session-close:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--red);
+}
+
+.session-close:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.session-row--running { border-left-color: var(--blue); }
+.session-row--needs_input {
+  border-left-color: var(--amber);
+  background: rgba(240, 180, 41, 0.08);
+}
+.session-row--succeeded { border-left-color: var(--green-strong); }
+.session-row--failed { border-left-color: var(--red-strong); }
+
+.session-status--running {
+  color: var(--blue);
+  display: inline-block;
+  animation: spin 1.1s linear infinite;
+}
+.session-status--needs_input { color: var(--amber); }
+.session-status--succeeded { color: var(--green); }
+.session-status--failed { color: var(--red); }
+
+.session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-time {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.session-exit {
+  flex-shrink: 0;
+  color: var(--red);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.session-interactive {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.session-needs-input {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(240, 180, 41, 0.15);
+  color: var(--amber);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.session-opening {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.session-attach {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.session-attach:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* --- Dispatch bar --- */
+
+.dispatch-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.dispatch-bar-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+/* --- Dispatch mode dialog (headless vs. interactive) --- */
+
+.dispatch-mode-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 100;
+}
+
+.dispatch-mode-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 360px;
+  padding: 20px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dispatch-mode-dialog-label {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dispatch-mode-dialog-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dispatch-mode-dialog-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.12s;
+}
+
+.dispatch-mode-dialog-option:hover {
+  border-color: var(--accent);
+}
+
+.dispatch-mode-dialog-option-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dispatch-mode-dialog-option-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.dispatch-mode-dialog-cancel {
+  align-self: flex-end;
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dispatch-mode-dialog-cancel:hover {
+  color: var(--text);
+}
+
+.dispatch-input {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.12s;
+}
+
+.dispatch-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.dispatch-input:disabled {
+  opacity: 0.6;
+}
+
+/* --- Pearl config (SOUL.md editor) --- */
+
+.focus-column-body--pearl-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.pearl-soul-editor {
+  flex: 1;
+  min-height: 320px;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-sunken);
+  color: var(--text);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.12s;
+}
+
+.pearl-soul-editor:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.pearl-soul-editor:disabled {
+  opacity: 0.6;
+}
+
+.pearl-soul-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pearl-soul-saved {
+  color: var(--green);
+  font-size: 12px;
+}
+
+/* --- Ticket detail (expanded under a focused ticket) --- */
+
+.detail-panel {
+  padding: 16px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--border);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.detail-section {
+  padding: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.detail-section h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  letter-spacing: 0.5px;
+}
+
+.detail-section.full-width {
+  grid-column: 1 / -1;
+}
+
+.detail-description {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.meta-row {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.meta-label {
+  color: var(--text-muted);
+  min-width: 80px;
+}
+
+.meta-value {
+  color: var(--text);
+}
+
+.meta-value a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.meta-value a:hover {
+  text-decoration: underline;
+}
+
+.plan-subheading {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+/* --- PR panel (inside ticket detail) --- */
+
+.pr-external-link {
+  margin-left: 8px;
+  color: var(--blue);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pr-external-link:hover {
+  text-decoration: underline;
+}
+
+.pr-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-top: 8px;
+  margin-bottom: 12px;
+  color: var(--text-bright);
+}
+
+.pr-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pr-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pr-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.pr-stat-value {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.pr-state {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.pr-state--open {
+  color: var(--green-strong);
+}
+
+.pr-state--closed {
+  color: var(--red-strong);
+}
+
+.pr-state--merged {
+  color: var(--accent);
+}
+
+.pr-diff-bar {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: monospace;
+  margin-bottom: 12px;
+}
+
+.pr-additions {
+  color: var(--green);
+}
+
+.pr-deletions {
+  color: var(--red);
+}
+
+.pr-files {
+  color: var(--text-muted);
+}
+
+.pr-reviews {
+  margin-bottom: 12px;
+}
+
+.pr-review-badge {
+  display: inline-block;
+  margin-right: 12px;
+  font-size: 12px;
+}
+
+.pr-checks {
+  margin-bottom: 12px;
+}
+
+.pr-checks-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.pr-check-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.pr-check-name {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-diffstat-toggle {
+  cursor: pointer;
+}
+
+.pr-diffstat-toggle summary {
+  font-size: 12px;
+  color: var(--blue);
+  padding: 4px 0;
+}
+
+.pr-diffstat {
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 300px;
+  overflow-y: auto;
+  color: var(--text);
+}

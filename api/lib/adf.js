@@ -1,0 +1,352 @@
+export function extractTextFromAdf(node) {
+  if (!node) return "";
+  if (node.type === "text") return node.text || "";
+  if (Array.isArray(node.content)) {
+    return node.content.map(extractTextFromAdf).join("");
+  }
+  return "";
+}
+
+// A readable plain-text rendering of an ADF document — paragraphs and
+// headings as blocks separated by a blank line, list items bulleted with
+// "- ". Not a full ADF renderer (no nesting, code blocks, or tables): this
+// is for showing a Jira description as text, not reproducing its exact
+// formatting.
+export function adfToPlainText(doc) {
+  if (!doc?.content) return "";
+  const parts = [];
+  for (const node of doc.content) {
+    if (node.type === "bulletList" || node.type === "orderedList") {
+      // One list is one block — items within it are one line apart, not a
+      // blank line apart like separate blocks are.
+      const items = (node.content || [])
+        .map((item) => extractTextFromAdf(item).trim())
+        .filter(Boolean)
+        .map((text) => `- ${text}`);
+      if (items.length) parts.push(items.join("\n"));
+    } else {
+      const text = extractTextFromAdf(node).trim();
+      if (text) parts.push(text);
+    }
+  }
+  return parts.join("\n\n");
+}
+
+export function extractListItemTexts(adfBody) {
+  const texts = [];
+  function walk(node) {
+    if (!node) return;
+    if (node.type === "listItem") {
+      texts.push(extractTextFromAdf(node));
+      return;
+    }
+    if (Array.isArray(node.content)) {
+      for (const child of node.content) walk(child);
+    }
+  }
+  walk(adfBody);
+  return texts;
+}
+
+export function checklistToAdf(steps, marker) {
+  const items = steps.map((s) => ({
+    type: "listItem",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: `${s.done ? "✅" : "⬜"} ${s.num}. ${s.label}`,
+          },
+        ],
+      },
+    ],
+  }));
+
+  return {
+    version: 1,
+    type: "doc",
+    content: [
+      {
+        type: "paragraph",
+        content: [
+          {
+            type: "text",
+            text: `${marker} `,
+            marks: [{ type: "code" }],
+          },
+          {
+            type: "text",
+            text: "Execution checklist",
+            marks: [{ type: "strong" }],
+          },
+        ],
+      },
+      { type: "bulletList", content: items },
+    ],
+  };
+}
+
+export function planToAdf(sections, marker) {
+  const content = [
+    {
+      type: "paragraph",
+      content: [
+        { type: "text", text: `${marker} `, marks: [{ type: "code" }] },
+        { type: "text", text: "Execution plan", marks: [{ type: "strong" }] },
+      ],
+    },
+  ];
+
+  for (const section of sections) {
+    content.push({
+      type: "heading",
+      attrs: { level: 3 },
+      content: [{ type: "text", text: section.title }],
+    });
+
+    const items = section.tasks.map((t) => ({
+      type: "listItem",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: `${t.done ? "✅" : "⬜"} ${t.label}` },
+          ],
+        },
+      ],
+    }));
+
+    content.push({ type: "bulletList", content: items });
+  }
+
+  return { version: 1, type: "doc", content };
+}
+
+export function parseChecklistFromComment(adfBody) {
+  const texts = extractListItemTexts(adfBody);
+  const steps = [];
+  for (const text of texts) {
+    const match = text.match(/^(✅|⬜)\s*(\d+)\.\s*(.+)$/);
+    if (match) {
+      steps.push({
+        num: parseInt(match[2], 10),
+        done: match[1] === "✅",
+        label: match[3],
+      });
+    }
+  }
+  return steps.length ? { steps, frontmatter: {} } : null;
+}
+
+export function parsePlanFromComment(adfBody) {
+  let total = 0;
+  let completed = 0;
+  const texts = extractListItemTexts(adfBody);
+  for (const text of texts) {
+    const match = text.match(/^(✅|⬜)\s*.+$/);
+    if (match) {
+      total++;
+      if (match[1] === "✅") completed++;
+    }
+  }
+  return total ? { total, completed } : null;
+}
+
+function bodyToAdfNodes(body) {
+  const text = (body || "").trim();
+  if (!text) return [];
+
+  const nodes = [];
+  const lines = text.split("\n");
+  let buffer = [];
+  let bulletItems = [];
+
+  function flushParagraph() {
+    if (!buffer.length) return;
+    nodes.push({
+      type: "paragraph",
+      content: [{ type: "text", text: buffer.join("\n") }],
+    });
+    buffer = [];
+  }
+
+  function flushBullets() {
+    if (!bulletItems.length) return;
+    nodes.push({
+      type: "bulletList",
+      content: bulletItems.map((item) => ({
+        type: "listItem",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: item }],
+          },
+        ],
+      })),
+    });
+    bulletItems = [];
+  }
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const bulletMatch = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      bulletItems.push(bulletMatch[1]);
+      continue;
+    }
+    if (!line.trim()) {
+      flushBullets();
+      flushParagraph();
+      continue;
+    }
+    flushBullets();
+    buffer.push(line);
+  }
+  flushBullets();
+  flushParagraph();
+
+  return nodes;
+}
+
+export function activityHeader(marker) {
+  return {
+    type: "paragraph",
+    content: [
+      { type: "text", text: `${marker} `, marks: [{ type: "code" }] },
+      {
+        type: "text",
+        text: "Claude Activity Log",
+        marks: [{ type: "strong" }],
+      },
+    ],
+  };
+}
+
+export function activityEntryNodes(timestamp, heading, body) {
+  return [
+    {
+      type: "heading",
+      attrs: { level: 3 },
+      content: [{ type: "text", text: `${timestamp} — ${heading}` }],
+    },
+    ...bodyToAdfNodes(body),
+  ];
+}
+
+export function appendActivityToAdf(
+  existing,
+  marker,
+  timestamp,
+  heading,
+  body,
+) {
+  const entry = activityEntryNodes(timestamp, heading, body);
+  if (!existing?.content?.length) {
+    return {
+      version: 1,
+      type: "doc",
+      content: [activityHeader(marker), ...entry],
+    };
+  }
+  return {
+    version: 1,
+    type: "doc",
+    content: [...existing.content, ...entry],
+  };
+}
+
+export function collapseActivityAdf(existing, marker, collapseLabel) {
+  if (!existing?.content?.length) {
+    return { version: 1, type: "doc", content: [activityHeader(marker)] };
+  }
+
+  const [, ...rest] = existing.content;
+  const hasEntries = rest.some((node) => node.type === "heading");
+  if (!hasEntries) {
+    return { version: 1, type: "doc", content: [activityHeader(marker)] };
+  }
+
+  const collapsedSummary = summarizeCollapsedEntries(rest);
+  return {
+    version: 1,
+    type: "doc",
+    content: [
+      activityHeader(marker),
+      {
+        type: "heading",
+        attrs: { level: 3 },
+        content: [{ type: "text", text: collapseLabel }],
+      },
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: collapsedSummary }],
+      },
+    ],
+  };
+}
+
+function summarizeCollapsedEntries(nodes) {
+  const headings = [];
+  for (const node of nodes) {
+    if (node.type === "heading") {
+      headings.push(extractTextFromAdf(node));
+    }
+  }
+  if (!headings.length) return "(no prior entries)";
+  return `${headings.length} prior entries: ${headings.join("; ")}`;
+}
+
+export function parseActivityFromComment(adfBody) {
+  if (!adfBody?.content?.length) return null;
+  const entries = [];
+  let current = null;
+  for (const node of adfBody.content) {
+    if (node.type === "heading") {
+      if (current) entries.push(current);
+      current = { heading: extractTextFromAdf(node), bodyNodes: [] };
+    } else if (current) {
+      current.bodyNodes.push(node);
+    }
+  }
+  if (current) entries.push(current);
+  return { entries };
+}
+
+export function parsePlanSectionsFromComment(adfBody) {
+  const sections = [];
+  let currentSection = null;
+
+  if (!adfBody?.content) return null;
+
+  for (const node of adfBody.content) {
+    if (node.type === "heading") {
+      currentSection = { title: extractTextFromAdf(node), tasks: [] };
+      sections.push(currentSection);
+    } else if (node.type === "bulletList" && currentSection) {
+      for (const item of node.content || []) {
+        const text = extractTextFromAdf(item);
+        const match = text.match(/^(✅|⬜)\s*(.+)$/);
+        if (match) {
+          currentSection.tasks.push({
+            done: match[1] === "✅",
+            label: match[2],
+          });
+        }
+      }
+    }
+  }
+
+  const withTasks = sections.filter((s) => s.tasks.length > 0);
+  if (!withTasks.length) return null;
+
+  const total = withTasks.reduce((sum, s) => sum + s.tasks.length, 0);
+  const completed = withTasks.reduce(
+    (sum, s) => sum + s.tasks.filter((t) => t.done).length,
+    0,
+  );
+
+  return { sections: withTasks, total, completed };
+}
