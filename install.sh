@@ -14,6 +14,38 @@ if [ ! -f "$SCRIPT_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
 fi
 
 echo ""
+echo "Installing commands..."
+
+# Dispatch (api/server.js) prepends /automodel to every spawned agent's
+# prompt before it ever touches the actual task — without this symlinked
+# into ~/.claude/commands, the CLI can't resolve it in whatever repo the
+# agent runs in, and the model ends up trying to invoke it as a (nonexistent)
+# Skill with the task text as an argument instead.
+CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+mkdir -p "$CLAUDE_COMMANDS_DIR"
+for file in "$SCRIPT_DIR"/commands/*.md; do
+  [ -f "$file" ] || continue
+  name=$(basename "$file")
+  target="$CLAUDE_COMMANDS_DIR/$name"
+
+  if [ -L "$target" ]; then
+    rm "$target"
+  elif [ -f "$target" ]; then
+    backup="$target.bak"
+    n=1
+    while [ -e "$backup" ]; do
+      backup="$target.bak.$n"
+      n=$((n + 1))
+    done
+    echo "  Backing up existing $name -> $(basename "$backup")"
+    mv "$target" "$backup"
+  fi
+
+  ln -s "$file" "$target"
+  echo "  Linked $name"
+done
+
+echo ""
 echo "Checking optional runtime dependencies..."
 
 # tmux backs every dashboard-spawned session (dispatched agents, and the
