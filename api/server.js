@@ -103,6 +103,8 @@ async function buildSnapshot() {
         summary: fields.summary,
         statusName: fields.status?.name || null,
         labels: fields.labels || [],
+        issueType: fields.issuetype?.name || null,
+        isSubtask: fields.issuetype?.subtask === true,
         blockedBy: blockedByKeys(fields.issuelinks),
         blocks: blocksKeys(fields.issuelinks),
         dueDate: fields.duedate || null,
