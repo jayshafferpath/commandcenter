@@ -25,7 +25,7 @@ import {
   startCommandJob,
 } from "./run-command.js";
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
-import { resolveRepoRoot } from "./lib/util.js";
+import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 
 // Personal todos are Jira issues too — a different label, not a different
@@ -343,14 +343,32 @@ app.post("/api/dispatch", async (request, reply) => {
       return { ok: false, error: `Unknown ticket ${key}: ${err.message}` };
     }
 
-    const repoRoot = resolveRepoRoot(detail.labels || [], DEV_ROOT);
-    if (!repoRoot) {
+    // Parent labels aren't on `detail` (getTicketDetail only keeps
+    // key/summary for `stack`), so a subtask whose repo lives on its parent
+    // needs a second fetch here, kept out of resolveRepoRoot itself.
+    let parentLabels = [];
+    if (detail.stack) {
+      const parent = await getIssue(detail.stack.key);
+      parentLabels = parent.fields?.labels || [];
+    }
+
+    const { root, name, source } = resolveRepoRoot(DEV_ROOT, {
+      labels: detail.labels,
+      parentLabels,
+      description: detail.description,
+    });
+
+    let repoNote = null;
+    if (name && !root) {
       reply.code(400);
-      return { ok: false, error: "No repo: label resolves to a local clone" };
+      return { ok: false, error: repoNotFoundError(name, source, DEV_ROOT) };
+    }
+    if (!name) {
+      repoNote = "Repo could not be determined from labels or description — running in DEV_ROOT.";
     }
 
     ticketKey = key;
-    cwd = repoRoot;
+    cwd = root || DEV_ROOT;
     title = `${key} — ${detail.summary}`.slice(0, 70);
     const jiraLink = JIRA_DOMAIN ? `https://${JIRA_DOMAIN}/browse/${key}` : key;
     // The whole thing a human would see expanding this ticket in
@@ -364,6 +382,7 @@ app.post("/api/dispatch", async (request, reply) => {
       detail.blocks.length ? `Blocks: ${detail.blocks.join(", ")}` : null,
       detail.dueDate ? `Due: ${detail.dueDate}` : null,
       `Jira: ${jiraLink}`,
+      repoNote,
       detail.description ? `\nDescription:\n${detail.description}` : null,
     ]
       .filter(Boolean)

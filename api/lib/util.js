@@ -48,12 +48,53 @@ export function detectWorkDir(workDir, relPath) {
   return null;
 }
 
-export function resolveRepoRoot(labels, devRoot) {
-  if (!devRoot) return null;
-  const repoLabel = labels.find((l) => l.startsWith("repo:"));
-  if (!repoLabel) return null;
-  const candidate = join(devRoot, repoLabel.slice(5));
-  return existsSync(candidate) ? candidate : null;
+export function extractRepoLabel(labels) {
+  const repoLabel = (labels || []).find((l) => l.startsWith("repo:"));
+  return repoLabel ? repoLabel.slice(5) : null;
+}
+
+// NEV-2355's subtasks (no label of their own) name their repo in the
+// description instead, as a "Repo:" line — optionally bold and/or
+// backticked, matching however a given ticket happens to format it.
+export function extractRepoFromDescription(description) {
+  if (!description) return null;
+  const match = description.match(/^\*{0,2}Repo:\*{0,2}\s*`?([\w./-]+)`?\s*$/im);
+  return match ? match[1] : null;
+}
+
+// Fallback chain for finding which repo a ticket belongs to, since most
+// tickets (and nearly all subtasks) carry no repo: label themselves: the
+// ticket's own label, then its parent's label, then a "Repo:" line in its
+// own description. The first source that names a repo wins — even if that
+// repo isn't cloned locally, so the caller can report precisely which
+// source/path it checked rather than silently falling through.
+export function resolveRepoRoot(devRoot, { labels, parentLabels, description } = {}) {
+  if (!devRoot) return { root: null, name: null, source: null };
+
+  const candidates = [
+    { source: "label", name: extractRepoLabel(labels) },
+    { source: "parent label", name: extractRepoLabel(parentLabels) },
+    { source: "description", name: extractRepoFromDescription(description) },
+  ];
+
+  for (const { source, name } of candidates) {
+    if (!name) continue;
+    const root = join(devRoot, name);
+    return { root: existsSync(root) ? root : null, name, source };
+  }
+
+  return { root: null, name: null, source: null };
+}
+
+export function repoNotFoundError(name, source, devRoot) {
+  const path = join(devRoot, name);
+  const label =
+    source === "parent label"
+      ? `repo:${name} (parent's label)`
+      : source === "description"
+        ? `Repo: ${name} (from description)`
+        : `repo:${name}`;
+  return `${label} → ${path} not found`;
 }
 
 export function topologicalSort(tickets, links) {
