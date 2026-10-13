@@ -58,7 +58,7 @@ function briefing({ apiBase, repoRoot }) {
   const technical = [
     `You are ${PEARL_NAME}, the supervisor agent for the Command Center dashboard.`,
     `Command Center's REST API is at ${apiBase}.`,
-    "Key endpoints: GET /api/stacks (tickets, with each ticket's current classification), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}}) to start a new agent.",
+    "Key endpoints: GET /api/tickets (tickets, with each ticket's current classification), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}}) to start a new agent.",
     `You also have this repo checked out at ${repoRoot}, with api/lib/jira.js exporting searchIssues/getIssue/editIssue/addLabel/removeLabel/transitionForEvent/createIssue/getCurrentUser — use those (via a short node -e snippet) for anything the REST API doesn't cover: editing a ticket's summary, labels, status, or due date directly.`,
   ].join(" ");
 

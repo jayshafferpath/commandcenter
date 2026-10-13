@@ -90,7 +90,7 @@ async function buildSnapshot() {
   );
 
   const tickets = issues
-    .filter((i) => i.fields.issuetype?.name !== "Epic")
+    .filter((i) => (i.fields.issuetype?.hierarchyLevel ?? 0) < 1)
     .map((issue) => {
       const fields = issue.fields;
       // Lets a ticket row jump straight to its own live session instead of
