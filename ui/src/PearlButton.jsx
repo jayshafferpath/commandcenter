@@ -6,8 +6,9 @@
 import { useState } from "react";
 
 export function PearlButton({ actionsEnabled, name = "Pearl" }) {
-  const [state, setState] = useState("idle"); // idle | opening | error
+  const [state, setState] = useState("idle"); // idle | opening | refreshing | error
   const [error, setError] = useState(null);
+  const busy = state === "opening" || state === "refreshing";
 
   const open = async () => {
     setState("opening");
@@ -27,13 +28,39 @@ export function PearlButton({ actionsEnabled, name = "Pearl" }) {
     }
   };
 
+  // Discards whatever she's mid-conversation about, so this asks first —
+  // same confirm-before-destroy as closing a live session elsewhere in the
+  // dashboard, just native rather than a modal since it's a single yes/no.
+  const refresh = async () => {
+    const confirmed = window.confirm(
+      `Restart ${name}? Her current conversation will be lost; she'll reload SOUL.md and the briefing.`,
+    );
+    if (!confirmed) return;
+
+    setState("refreshing");
+    setError(null);
+    try {
+      const res = await fetch("/api/pearl/refresh", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) {
+        setState("error");
+        setError(data.error);
+        return;
+      }
+      setState("idle");
+    } catch (err) {
+      setState("error");
+      setError(err.message);
+    }
+  };
+
   return (
     <span className="pearl-button-wrap">
       <button
         type="button"
         className="btn pearl-toggle"
         onClick={open}
-        disabled={!actionsEnabled || state === "opening"}
+        disabled={!actionsEnabled || busy}
         title={
           !actionsEnabled
             ? `${name} is disabled (set DASHBOARD_ALLOW_ACTIONS=true)`
@@ -41,6 +68,15 @@ export function PearlButton({ actionsEnabled, name = "Pearl" }) {
         }
       >
         ● {state === "opening" ? "opening…" : name}
+      </button>
+      <button
+        type="button"
+        className="btn pearl-refresh"
+        onClick={refresh}
+        disabled={!actionsEnabled || busy}
+        title={`Restart ${name} — she'll reload SOUL.md and the briefing, losing her current conversation`}
+      >
+        {state === "refreshing" ? "restarting…" : "↻"}
       </button>
       {state === "error" && <span className="pearl-error-inline">{error}</span>}
     </span>

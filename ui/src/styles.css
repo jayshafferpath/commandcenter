@@ -149,6 +149,16 @@ body {
   background: rgba(179, 136, 255, 0.1);
 }
 
+.pearl-refresh {
+  padding: 6px 8px;
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.pearl-refresh:hover:not(:disabled) {
+  background: rgba(179, 136, 255, 0.1);
+}
+
 .pearl-error-inline {
   position: absolute;
   top: calc(100% + 6px);

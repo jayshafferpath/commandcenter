@@ -1,8 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { __test__, readSoul, writeSoul } from "../api/pearl.js";
+import { __test__, readSoul, refreshPearl, writeSoul } from "../api/pearl.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, execFileSync: vi.fn() };
+});
+vi.mock("../api/run-command.js", () => ({ openSessionInIterm: vi.fn(() => ({ ok: true })) }));
 
 const { SESSION, briefing } = __test__;
 
@@ -64,6 +71,91 @@ describe("readSoul/writeSoul", () => {
   it("round-trips written content", () => {
     writeSoul(dir, "# Pearl\n\nBe direct.");
     expect(readSoul(dir)).toBe("# Pearl\n\nBe direct.");
+  });
+});
+
+describe("refreshPearl", () => {
+  let sessionAlive;
+
+  beforeEach(() => {
+    sessionAlive = true;
+    execFileSync.mockReset();
+    execFileSync.mockImplementation((cmd, args) => {
+      if (cmd !== "tmux") return "";
+      const [sub] = args;
+      if (sub === "has-session") {
+        if (!sessionAlive) throw new Error("can't find session");
+        return "";
+      }
+      if (sub === "kill-session") {
+        sessionAlive = false;
+        return "";
+      }
+      if (sub === "new-session") {
+        sessionAlive = true;
+        return "";
+      }
+      return "";
+    });
+  });
+
+  it("kills the existing session before spawning a fresh one", () => {
+    const result = refreshPearl({
+      cwd: "/tmp",
+      apiBase: "http://localhost:3789",
+      repoRoot: "/tmp",
+    });
+
+    const subcommands = execFileSync.mock.calls
+      .filter(([cmd]) => cmd === "tmux")
+      .map(([, args]) => args[0]);
+
+    expect(subcommands.indexOf("kill-session")).toBeGreaterThanOrEqual(0);
+    expect(subcommands.indexOf("kill-session")).toBeLessThan(subcommands.lastIndexOf("new-session"));
+    expect(result.ok).toBe(true);
+    expect(result.spawned).toBe(true);
+  });
+
+  it("behaves like a plain open when no session exists yet", () => {
+    sessionAlive = false;
+
+    const result = refreshPearl({
+      cwd: "/tmp",
+      apiBase: "http://localhost:3789",
+      repoRoot: "/tmp",
+    });
+
+    const subcommands = execFileSync.mock.calls
+      .filter(([cmd]) => cmd === "tmux")
+      .map(([, args]) => args[0]);
+
+    expect(subcommands).not.toContain("kill-session");
+    expect(subcommands).toContain("new-session");
+    expect(result.ok).toBe(true);
+    expect(result.spawned).toBe(true);
+  });
+
+  it("surfaces a tmux kill failure instead of spawning over a session still running", () => {
+    execFileSync.mockImplementation((cmd, args) => {
+      const [sub] = args;
+      if (sub === "has-session") return ""; // always reports alive
+      if (sub === "kill-session") throw new Error("tmux: permission denied");
+      return "";
+    });
+
+    const result = refreshPearl({
+      cwd: "/tmp",
+      apiBase: "http://localhost:3789",
+      repoRoot: "/tmp",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("permission denied");
+
+    const subcommands = execFileSync.mock.calls
+      .filter(([cmd]) => cmd === "tmux")
+      .map(([, args]) => args[0]);
+    expect(subcommands).not.toContain("new-session");
   });
 });
 

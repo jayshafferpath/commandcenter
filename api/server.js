@@ -24,7 +24,7 @@ import {
   serializeJob,
   startCommandJob,
 } from "./run-command.js";
-import { openPearl, PEARL_NAME, readSoul, writeSoul } from "./pearl.js";
+import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
 import { resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 
@@ -418,6 +418,28 @@ app.post("/api/pearl/open", async (request, reply) => {
   }
 
   const result = openPearl({
+    cwd: REPO_ROOT,
+    repoRoot: REPO_ROOT,
+    apiBase: `http://localhost:${PORT}`,
+  });
+  if (!result.ok) reply.code(400);
+  return result;
+});
+
+// Restarts Pearl's session so edits to SOUL.md or the briefing in pearl.js
+// actually reach her — otherwise they sit unused until someone kills her
+// tmux session by hand. Confirmation that this discards her current
+// conversation happens in the UI; this route just does the kill-then-spawn.
+app.post("/api/pearl/refresh", async (request, reply) => {
+  if (!isExecutionEnabled()) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: `${PEARL_NAME} is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.`,
+    };
+  }
+
+  const result = refreshPearl({
     cwd: REPO_ROOT,
     repoRoot: REPO_ROOT,
     apiBase: `http://localhost:${PORT}`,
