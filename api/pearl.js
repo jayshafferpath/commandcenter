@@ -100,4 +100,34 @@ export function openPearl({ cwd, apiBase, repoRoot }) {
   return { ...result, spawned };
 }
 
-export const __test__ = { SESSION, briefing };
+function killSession() {
+  try {
+    execFileSync("tmux", ["kill-session", "-t", SESSION], { stdio: "ignore" });
+    return { ok: true };
+  } catch (err) {
+    // kill-session also fails if the session is already gone between the
+    // sessionExists() check and this call — confirm that's actually why
+    // before reporting failure, same reasoning as run-command.js's closeJob.
+    if (!sessionExists()) return { ok: true };
+    return { ok: false, error: err.message };
+  }
+}
+
+// Restarts Pearl so she picks up fresh SOUL.md/briefing edits: kills her
+// session if one exists, then re-runs the same ensureSession/open path
+// openPearl uses, so a restart behaves exactly like a first open once the
+// old session is gone. With no existing session this is just an open.
+export function refreshPearl({ cwd, apiBase, repoRoot }) {
+  if (sessionExists()) {
+    const killed = killSession();
+    if (!killed.ok) {
+      return { ok: false, error: `Failed to restart ${PEARL_NAME}: ${killed.error}` };
+    }
+  }
+
+  const spawned = ensureSession({ cwd, apiBase, repoRoot });
+  const result = openSessionInIterm(SESSION);
+  return { ...result, spawned };
+}
+
+export const __test__ = { SESSION, briefing, sessionExists, killSession };
