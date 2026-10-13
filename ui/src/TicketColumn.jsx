@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { TicketDetail } from "./TicketDetail.jsx";
 import { OpenInIterm } from "./SessionColumn.jsx";
+import { IssueTypeIcon } from "./IssueTypeIcon.jsx";
 import { daysUntil, dueTone, formatDue } from "./dueDate.js";
 
 export function TicketColumn({ tickets, jiraBaseUrl, onSpawnAgent }) {
@@ -47,6 +48,7 @@ export function TicketColumn({ tickets, jiraBaseUrl, onSpawnAgent }) {
                   }
                 }}
               >
+                <IssueTypeIcon issueType={ticket.issueType} />
                 {jiraBaseUrl ? (
                   <a
                     href={`${jiraBaseUrl}/${ticket.key}`}

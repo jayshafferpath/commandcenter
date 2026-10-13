@@ -420,6 +420,14 @@ body {
   transform: translateX(2px);
 }
 
+.focus-item-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
 .focus-item-key {
   font-weight: 600;
   color: var(--blue);
