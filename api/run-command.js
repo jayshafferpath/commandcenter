@@ -305,15 +305,77 @@ export function findRunningJobForTicket(ticketKey) {
   return null;
 }
 
+// ttys of iTerm2 panes currently attached to `session`, per tmux itself —
+// the same source of truth tmux uses to decide whether a session has a live
+// client. Empty whenever the session doesn't exist or nothing is attached
+// (both report as a non-zero exit from `list-clients`), which just means
+// there's nothing to find a window for, not an error worth surfacing.
+function attachedTtys(session) {
+  try {
+    const out = execFileSync("tmux", ["list-clients", "-t", session], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out
+      .split("\n")
+      .map((line) => line.split(":")[0].trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Brings an already-open iTerm2 window to the front instead of creating a
+// new one, if one of its panes' ttys matches a tty tmux reports as attached
+// to the session. Returns false (not an error) when nothing matches, so the
+// caller falls back to creating a window the same way it always has.
+function focusExistingWindow(ttys) {
+  // ttys come from tmux's own `list-clients` output, never user input, so
+  // interpolating them into the AppleScript source is safe — same reasoning
+  // as the shell-command paths above.
+  const ttyChecks = ttys.map((tty) => `tty of s is "${tty}"`).join(" or ");
+
+  const script = `
+tell application "iTerm"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if ${ttyChecks} then
+          select w
+          select t
+          return true
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return false
+end tell`;
+
+  try {
+    const out = execFileSync("osascript", ["-e", script], { encoding: "utf-8" });
+    return out.trim() === "true";
+  } catch {
+    return false;
+  }
+}
+
 // Opens a real iTerm2 window on this machine and attaches it to the given
-// tmux session. Only meaningful when the dashboard's own server process is
-// running on the same Mac as the person clicking the button — same trust
-// model as the rest of this app, which assumes a single local user and has
-// no auth of its own. Shared by openInIterm (per-job) and pearl.js (her one
-// persistent session) rather than duplicated between them.
+// tmux session, reusing an already-attached window instead of creating a
+// duplicate one if the session already has an open iTerm2 pane. Only
+// meaningful when the dashboard's own server process is running on the same
+// Mac as the person clicking the button — same trust model as the rest of
+// this app, which assumes a single local user and has no auth of its own.
+// Shared by openInIterm (per-job) and pearl.js (her one persistent session)
+// rather than duplicated between them.
 export function openSessionInIterm(session) {
   if (process.platform !== "darwin") {
     return { ok: false, error: "Opening iTerm is only supported on macOS" };
+  }
+
+  const ttys = attachedTtys(session);
+  if (ttys.length > 0 && focusExistingWindow(ttys)) {
+    return { ok: true };
   }
 
   // `session` is always our own uuid-derived or fixed string (never user
