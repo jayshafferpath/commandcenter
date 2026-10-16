@@ -3,13 +3,7 @@
 // the log itself lives in the actual tmux pane, one click away.
 
 import { useEffect, useState } from "react";
-
-const STATUS_GLYPH = {
-  running: "◌",
-  needs_input: "⚠",
-  succeeded: "✓",
-  failed: "✗",
-};
+import { StatusIcon } from "./StatusIcon.jsx";
 
 function useOpenInIterm(jobId) {
   const [state, setState] = useState("idle"); // idle | opening | error
@@ -78,7 +72,7 @@ function SessionCard({ job, onClose }) {
         title={state === "error" ? error : canOpen ? "Open a real iTerm2 window attached to this session" : undefined}
       >
         <span className={`session-status session-status--${job.status}`}>
-          {STATUS_GLYPH[job.status] || "?"}
+          <StatusIcon status={job.status} />
         </span>
         <span className="session-title">{title}</span>
         <span className="session-time">

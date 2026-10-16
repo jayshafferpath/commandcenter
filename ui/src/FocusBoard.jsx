@@ -226,7 +226,7 @@ export function FocusBoard() {
       <div className="focus-header">
         <h1 className="focus-wordmark">
           <img src={logo} alt="Orders Cap'n?" className="focus-wordmark-logo" />
-          Command Center
+          <span className="focus-wordmark-text">Command Center</span>
         </h1>
         <div className="focus-header-actions">
           <PearlButton actionsEnabled={actionsEnabled} name={pearlName} />
@@ -243,7 +243,7 @@ export function FocusBoard() {
               <button
                 key={tab.id}
                 type="button"
-                className={`focus-tab${activeTab === tab.id ? " focus-tab--active" : ""}`}
+                className={`focus-tab focus-tab--${tab.id}${activeTab === tab.id ? " focus-tab--active" : ""}`}
                 onClick={() => setActiveTab(tab.id)}
               >
                 {tab.label}

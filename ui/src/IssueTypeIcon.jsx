@@ -49,12 +49,28 @@ const FALLBACK = (
   </svg>
 );
 
+const COLOR_SLUG = {
+  Story: "story",
+  Task: "task",
+  Bug: "bug",
+  Spike: "spike",
+  "Sub-task": "subtask",
+  Subtask: "subtask",
+  Epic: "epic",
+};
+
 export function IssueTypeIcon({ issueType }) {
   const icon = (issueType && ICONS[issueType]) || FALLBACK;
   const label = issueType || "Unknown type";
+  const colorSlug = (issueType && COLOR_SLUG[issueType]) || "default";
 
   return (
-    <span className="focus-item-type-icon" title={label} aria-label={label} role="img">
+    <span
+      className={`focus-item-type-icon focus-item-type-icon--${colorSlug}`}
+      title={label}
+      aria-label={label}
+      role="img"
+    >
       {icon}
     </span>
   );

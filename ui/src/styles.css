@@ -46,13 +46,32 @@ body {
   line-height: 1.5;
 }
 
+::selection {
+  background: var(--accent-dim);
+  color: #fff;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-sunken);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
+
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.55); }
   50% { box-shadow: 0 0 0 4px rgba(110, 168, 254, 0); }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .btn {
@@ -81,13 +100,14 @@ body {
 }
 
 .btn--primary {
-  background: var(--green-strong);
+  background: linear-gradient(135deg, var(--green-strong), var(--green-strong-hover));
   border-color: var(--green-strong-hover);
   color: #fff;
 }
 
 .btn--primary:hover {
-  background: var(--green-strong-hover);
+  background: linear-gradient(135deg, var(--green-strong-hover), var(--green-strong));
+  box-shadow: 0 0 0 3px rgba(63, 214, 122, 0.18);
 }
 
 .loading,
@@ -182,6 +202,13 @@ body {
   letter-spacing: -0.2px;
 }
 
+.focus-wordmark-text {
+  background: linear-gradient(135deg, var(--accent), var(--blue));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 .focus-wordmark-logo {
   width: 22px;
   height: 22px;
@@ -209,9 +236,16 @@ body {
   min-height: 0;
   background: var(--bg-raised);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
   border-radius: 8px;
   overflow: hidden;
 }
+
+.focus-column--tickets { border-left-color: var(--blue); }
+.focus-column--todos { border-left-color: var(--amber); }
+.focus-column--prs { border-left-color: var(--green); }
+.focus-column--sessions { border-left-color: var(--accent); }
+.focus-column--pearl-config { border-left-color: var(--accent); }
 
 /* Left grid cell: a tab bar above a single visible panel. All three tab
    panels stay mounted (display:none when inactive) so switching tabs is
@@ -252,7 +286,15 @@ body {
   border-color: var(--border);
   border-bottom-color: var(--bg-raised);
   color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
+
+/* Each tab borrows its own column's identity color, so the active tab's
+   underline previews what you're about to switch to. */
+.focus-tab--tickets.focus-tab--active { box-shadow: inset 0 -2px 0 var(--blue); }
+.focus-tab--todos.focus-tab--active { box-shadow: inset 0 -2px 0 var(--amber); }
+.focus-tab--prs.focus-tab--active { box-shadow: inset 0 -2px 0 var(--green); }
+.focus-tab--pearl.focus-tab--active { box-shadow: inset 0 -2px 0 var(--accent); }
 
 .focus-tab-panels {
   flex: 1;
@@ -428,6 +470,13 @@ body {
   color: var(--text-muted);
 }
 
+.focus-item-type-icon--story { color: var(--green); }
+.focus-item-type-icon--task { color: var(--blue); }
+.focus-item-type-icon--bug { color: var(--red); }
+.focus-item-type-icon--spike { color: var(--amber); }
+.focus-item-type-icon--subtask { color: var(--text-muted); }
+.focus-item-type-icon--epic { color: var(--accent); }
+
 .focus-item-key {
   font-weight: 600;
   color: var(--blue);
@@ -579,7 +628,10 @@ body {
   cursor: default;
 }
 
-.session-row--running { border-left-color: var(--blue); }
+.session-row--running {
+  border-left-color: var(--blue);
+  animation: pulse-glow 2.2s ease-in-out infinite;
+}
 .session-row--needs_input {
   border-left-color: var(--amber);
   background: rgba(240, 180, 41, 0.08);
@@ -590,7 +642,14 @@ body {
 .session-status--running {
   color: var(--blue);
   display: inline-block;
-  animation: spin 1.1s linear infinite;
+}
+
+.status-icon-scv {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: cover;
+  border-radius: 3px;
 }
 .session-status--needs_input { color: var(--amber); }
 .session-status--succeeded { color: var(--green); }
