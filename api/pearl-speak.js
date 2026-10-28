@@ -39,7 +39,7 @@ export function cleanForSpeech(text) {
 
 function speak(text) {
   const voice = process.env.PEARL_VOICE?.trim() || "Matilda (Premium)";
-  const rate = process.env.PEARL_SPEECH_RATE?.trim() || "210";
+  const rate = process.env.PEARL_SPEECH_RATE?.trim() || "240";
   const child = spawn("say", ["-v", voice, "-r", rate], { stdio: ["pipe", "ignore", "ignore"] });
   child.stdin.write(text);
   child.stdin.end();
