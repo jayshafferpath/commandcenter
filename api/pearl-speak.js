@@ -2,8 +2,13 @@
 // session (see pearl.js's --settings arg) — dispatched jobs never load
 // this.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
+
+// Below this, a reply is already short enough to just speak — skipping the
+// haiku round-trip saves the latency/cost on the common SOUL.md-style
+// one-line confirmation.
+const SUMMARIZE_THRESHOLD_CHARS = 80;
 
 export function extractLastAssistantText(lines) {
   let lastAssistant = null;
@@ -35,6 +40,30 @@ export function cleanForSpeech(text) {
     .replace(/[*_`]/g, "")
     .replace(/[ \t]+/g, " ")
     .trim();
+}
+
+// Condenses a long reply down to its core idea before speaking it, so
+// Pearl doesn't read whole paragraphs aloud. Falls back to the original
+// text on any failure (timeout, no auth, etc.) — losing the condensing is
+// better than losing the message.
+export function summarizeForSpeech(text) {
+  if (text.length < SUMMARIZE_THRESHOLD_CHARS) return text;
+
+  try {
+    const summary = execFileSync(
+      "claude",
+      [
+        "-p",
+        `Summarize the core idea of this in one short spoken sentence. No preamble, no quotes, just the sentence:\n\n${text}`,
+        "--model",
+        "haiku",
+      ],
+      { encoding: "utf-8", timeout: 10_000 },
+    ).trim();
+    return summary || text;
+  } catch {
+    return text;
+  }
 }
 
 function speak(text) {
@@ -72,7 +101,7 @@ async function main() {
   }
 
   const text = cleanForSpeech(extractLastAssistantText(content.split("\n")));
-  if (text) speak(text);
+  if (text) speak(summarizeForSpeech(text));
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { cleanForSpeech, extractLastAssistantText } from "../api/pearl-speak.js";
+import { execFileSync } from "node:child_process";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanForSpeech, extractLastAssistantText, summarizeForSpeech } from "../api/pearl-speak.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, execFileSync: vi.fn() };
+});
 
 function line(obj) {
   return JSON.stringify(obj);
@@ -71,5 +77,45 @@ describe("cleanForSpeech", () => {
 
   it("collapses runs of whitespace left behind by stripping", () => {
     expect(cleanForSpeech("a   b")).toBe("a b");
+  });
+});
+
+describe("summarizeForSpeech", () => {
+  afterEach(() => {
+    execFileSync.mockReset();
+  });
+
+  it("speaks short text as-is, skipping the haiku round-trip", () => {
+    const text = "Done.";
+    expect(summarizeForSpeech(text)).toBe(text);
+    expect(execFileSync).not.toHaveBeenCalled();
+  });
+
+  it("condenses long text via claude -p --model haiku", () => {
+    const longText = "x".repeat(200);
+    execFileSync.mockReturnValue("The core idea.\n");
+
+    expect(summarizeForSpeech(longText)).toBe("The core idea.");
+    expect(execFileSync).toHaveBeenCalledWith(
+      "claude",
+      expect.arrayContaining(["-p", "--model", "haiku"]),
+      expect.objectContaining({ encoding: "utf-8" }),
+    );
+  });
+
+  it("falls back to the original text if the summarize call fails", () => {
+    const longText = "x".repeat(200);
+    execFileSync.mockImplementation(() => {
+      throw new Error("timed out");
+    });
+
+    expect(summarizeForSpeech(longText)).toBe(longText);
+  });
+
+  it("falls back to the original text if the summary comes back empty", () => {
+    const longText = "x".repeat(200);
+    execFileSync.mockReturnValue("   ");
+
+    expect(summarizeForSpeech(longText)).toBe(longText);
   });
 });
