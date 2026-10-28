@@ -1,6 +1,6 @@
-// Pearl's Stop hook: speaks her reply aloud in a British voice. Wired in
-// only for her own session (see pearl.js's --settings arg) — dispatched
-// jobs never load this.
+// Pearl's Stop hook: speaks her reply aloud. Wired in only for her own
+// session (see pearl.js's --settings arg) — dispatched jobs never load
+// this.
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -38,7 +38,7 @@ export function cleanForSpeech(text) {
 }
 
 function speak(text) {
-  const voice = process.env.PEARL_VOICE?.trim() || "Daniel";
+  const voice = process.env.PEARL_VOICE?.trim() || "Tessa";
   const child = spawn("say", ["-v", voice], { stdio: ["pipe", "ignore", "ignore"] });
   child.stdin.write(text);
   child.stdin.end();

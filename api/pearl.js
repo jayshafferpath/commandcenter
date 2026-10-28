@@ -114,7 +114,7 @@ function ensureSession({ cwd, apiBase, repoRoot }) {
     // instead of her having to poll /api/jobs for them.
     "--name",
     PEARL_NAME,
-    // Speaks her replies aloud (pearl-speak.js) in a British voice.
+    // Speaks her replies aloud (pearl-speak.js).
     "--settings",
     speechSettings(repoRoot),
   ]);
