@@ -397,6 +397,12 @@ app.post("/api/dispatch", async (request, reply) => {
   // every dispatch defaulting to one model regardless of scope.
   composedPrompt = `/automodel\n\n${composedPrompt}`;
 
+  // Pushes completion back to Pearl instead of leaving her to poll
+  // /api/jobs — she's named (see pearl.js) so SendMessage can reach her
+  // directly. Only covers a job that can still run its own final turn; one
+  // wedged on a permission dialog can't execute this instruction either.
+  composedPrompt = `${composedPrompt}\n\n---\n\nWhen you finish — done, failed, or stopping because you're blocked — send ${PEARL_NAME} a brief status via the SendMessage tool: one or two sentences on what happened and whether anything needs human attention. Don't wait for a reply.`;
+
   if (!cwd) {
     reply.code(400);
     return { ok: false, error: "DEV_ROOT is not configured" };

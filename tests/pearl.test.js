@@ -135,6 +135,17 @@ describe("refreshPearl", () => {
     expect(result.spawned).toBe(true);
   });
 
+  it("names the session so dispatched agents can reach her by SendMessage", () => {
+    refreshPearl({ cwd: "/tmp", apiBase: "http://localhost:3789", repoRoot: "/tmp" });
+
+    const newSessionArgs = execFileSync.mock.calls.find(
+      ([cmd, args]) => cmd === "tmux" && args[0] === "new-session",
+    )[1];
+
+    expect(newSessionArgs.indexOf("--name")).toBeGreaterThanOrEqual(0);
+    expect(newSessionArgs[newSessionArgs.indexOf("--name") + 1]).toBe("Pearl");
+  });
+
   it("surfaces a tmux kill failure instead of spawning over a session still running", () => {
     execFileSync.mockImplementation((cmd, args) => {
       const [sub] = args;
@@ -181,5 +192,26 @@ describe("PEARL_NAME", () => {
         repoRoot: "/tmp",
       }),
     ).toContain("You are Marlowe");
+  });
+
+  it("uses the custom name as the session's --name so SendMessage can still reach her", async () => {
+    process.env.PEARL_NAME = "Marlowe";
+    vi.resetModules();
+    const childProcess = await import("node:child_process");
+    const mod = await import("../api/pearl.js");
+
+    childProcess.execFileSync.mockReset();
+    childProcess.execFileSync.mockImplementation((cmd, args) => {
+      if (args[0] === "has-session") throw new Error("no session");
+      return "";
+    });
+
+    mod.refreshPearl({ cwd: "/tmp", apiBase: "http://localhost:3789", repoRoot: "/tmp" });
+
+    const newSessionArgs = childProcess.execFileSync.mock.calls.find(
+      ([cmd, args]) => cmd === "tmux" && args[0] === "new-session",
+    )[1];
+
+    expect(newSessionArgs[newSessionArgs.indexOf("--name") + 1]).toBe("Marlowe");
   });
 });

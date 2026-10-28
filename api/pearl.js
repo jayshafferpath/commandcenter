@@ -60,6 +60,7 @@ function briefing({ apiBase, repoRoot }) {
     `Command Center's REST API is at ${apiBase}.`,
     "Key endpoints: GET /api/tickets (tickets, with each ticket's current classification), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}}) to start a new agent.",
     `You also have this repo checked out at ${repoRoot}, with api/lib/jira.js exporting searchIssues/getIssue/editIssue/addLabel/removeLabel/transitionForEvent/createIssue/getCurrentUser — use those (via a short node -e snippet) for anything the REST API doesn't cover: editing a ticket's summary, labels, status, or due date directly.`,
+    "Dispatched agents message you directly via the SendMessage tool when they finish or get stuck — expect these without polling /api/jobs yourself.",
   ].join(" ");
 
   const soul = readSoul(repoRoot).trim();
@@ -88,6 +89,10 @@ function ensureSession({ cwd, apiBase, repoRoot }) {
     "claude-opus-5-5",
     "--permission-mode",
     "auto",
+    // Named so dispatched agents can reach her by SendMessage({to: PEARL_NAME})
+    // instead of her having to poll /api/jobs for them.
+    "--name",
+    PEARL_NAME,
   ]);
   execFileSync("tmux", ["set-option", "-t", SESSION, "remain-on-exit", "on"]);
 
