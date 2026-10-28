@@ -146,6 +146,20 @@ describe("refreshPearl", () => {
     expect(newSessionArgs[newSessionArgs.indexOf("--name") + 1]).toBe("Pearl");
   });
 
+  it("scopes the speech Stop hook to her own session via --settings", () => {
+    refreshPearl({ cwd: "/tmp", apiBase: "http://localhost:3789", repoRoot: "/tmp" });
+
+    const newSessionArgs = execFileSync.mock.calls.find(
+      ([cmd, args]) => cmd === "tmux" && args[0] === "new-session",
+    )[1];
+
+    expect(newSessionArgs.indexOf("--settings")).toBeGreaterThanOrEqual(0);
+    const settingsJson = newSessionArgs[newSessionArgs.indexOf("--settings") + 1];
+    const parsed = JSON.parse(settingsJson);
+    expect(parsed.hooks.Stop[0].hooks[0].command).toContain("pearl-speak.js");
+    expect(parsed.hooks.Stop[0].hooks[0].async).toBe(true);
+  });
+
   it("surfaces a tmux kill failure instead of spawning over a session still running", () => {
     execFileSync.mockImplementation((cmd, args) => {
       const [sub] = args;

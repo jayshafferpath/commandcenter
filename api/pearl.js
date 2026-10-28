@@ -67,6 +67,27 @@ function briefing({ apiBase, repoRoot }) {
   return soul ? `${soul}\n\n---\n\n${technical}` : technical;
 }
 
+// Scoped to just Pearl's own session via --settings (an *additional*
+// settings source, not a replacement) — her tmux process picks this up
+// without touching ~/.claude/settings.json or any other Claude session.
+function speechSettings(repoRoot) {
+  return JSON.stringify({
+    hooks: {
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: `node ${resolve(repoRoot, "api/pearl-speak.js")}`,
+              async: true,
+            },
+          ],
+        },
+      ],
+    },
+  });
+}
+
 // Passed as the initial prompt argument rather than typed in afterward via
 // send-keys: `claude <prompt>` starts interactive mode already processing
 // that first message, then stays open for the human's own follow-up —
@@ -93,6 +114,9 @@ function ensureSession({ cwd, apiBase, repoRoot }) {
     // instead of her having to poll /api/jobs for them.
     "--name",
     PEARL_NAME,
+    // Speaks her replies aloud (pearl-speak.js) in a British voice.
+    "--settings",
+    speechSettings(repoRoot),
   ]);
   execFileSync("tmux", ["set-option", "-t", SESSION, "remain-on-exit", "on"]);
 
@@ -135,4 +159,4 @@ export function refreshPearl({ cwd, apiBase, repoRoot }) {
   return { ...result, spawned };
 }
 
-export const __test__ = { SESSION, briefing, sessionExists, killSession };
+export const __test__ = { SESSION, briefing, sessionExists, killSession, speechSettings };
