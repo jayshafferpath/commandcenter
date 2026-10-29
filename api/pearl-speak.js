@@ -67,9 +67,11 @@ export function summarizeForSpeech(text) {
 }
 
 function speak(text) {
-  const voice = process.env.PEARL_VOICE?.trim() || "Matilda (Premium)";
+  // Siri voices aren't addressable via `say -v`; omitting -v uses the system voice set in Spoken Content.
+  const voice = process.env.PEARL_VOICE?.trim();
   const rate = process.env.PEARL_SPEECH_RATE?.trim() || "210";
-  const child = spawn("say", ["-v", voice, "-r", rate], { stdio: ["pipe", "ignore", "ignore"] });
+  const voiceArgs = voice ? ["-v", voice] : [];
+  const child = spawn("say", [...voiceArgs, "-r", rate], { stdio: ["pipe", "ignore", "ignore"] });
   child.stdin.write(text);
   child.stdin.end();
 }
