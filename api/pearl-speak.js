@@ -2,18 +2,34 @@
 // session — see pearl.js's --settings arg) runs this with no subcommand and
 // caches her condensed reply; it's only spoken when Jay asks via a hotkey
 // (`say`), or when a turn was started by voice (`ask`, for a dictation tool
-// that can shell out directly; `arm`, for one like Wispr Flow that can only
-// autotype into the focused field — see .plans/push-to-talk-wispr.md).
-// `hush` cuts speech off. Dispatched jobs never load this.
+// that can shell out directly with the text already known; `preflight` +
+// `voice`, the push-to-talk pair driven by Superwhisper's CLI — see
+// .plans/push-to-talk-wispr.md). `hush` cuts speech off. Dispatched jobs
+// never load this.
 
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { openSessionInIterm } from "./run-command.js";
 import { SESSION } from "./pearl.js";
 
 const TMUX = "/opt/homebrew/bin/tmux";
+
+// Superwhisper's CLI (installed separately via its install-cli.sh, not by
+// the app bundle itself) lands in ~/.local/bin, not on the minimal PATH a
+// global hotkey tool like Hammerspoon runs with — same reasoning as TMUX
+// above. Overridable in case Jay's install lands somewhere else.
+const SUPERWHISPER_BIN =
+  process.env.PEARL_SUPERWHISPER_BIN?.trim() || join(homedir(), ".local/bin/superwhisper");
+
+// Set this to a mode key (Superwhisper Settings → that mode → its key) once
+// Jay has configured one with a local voice model and no language-model
+// stage. `preflight` switches to it before every recording so Pearl's voice
+// path can't silently end up on whatever mode happens to be active
+// elsewhere — which, out of the box, uses Superwhisper's cloud model. Left
+// unset, `preflight` just uses whatever mode is already active: the easier
+// path to a mistake, but not this script's call to force without a key.
+const SUPERWHISPER_MODE = process.env.PEARL_SUPERWHISPER_MODE?.trim() || "";
 
 // Below this, a reply is already short enough to just speak — skipping the
 // haiku round-trip saves the latency/cost on the common SOUL.md-style
@@ -30,6 +46,9 @@ const SAY_PID_PATH = join(STATE_DIR, "say.pid");
 // Set by `ask` so the reply to a spoken message is spoken back; the next
 // Stop hook consumes it.
 const SPEAK_NEXT_PATH = join(STATE_DIR, "speak-next");
+// Set by `preflight` right before Superwhisper starts recording; `voice`
+// reads and clears it once that recording's transcript shows up.
+const VOICE_BASELINE_PATH = join(STATE_DIR, "voice-baseline.json");
 
 export function extractLastAssistantText(lines) {
   let lastAssistant = null;
@@ -195,10 +214,11 @@ function capturePane() {
   return execFileSync(TMUX, ["capture-pane", "-p", "-t", SESSION], { encoding: "utf-8" });
 }
 
-function ask() {
-  const message = process.argv.slice(3).join(" ").trim();
-  if (!message) return;
-
+// Shared by `ask` (text already known) and `voice` (text fetched from
+// Superwhisper after the fact) — the one place that actually injects
+// something into Pearl's pane, so the isAtChatPrompt guard only needs
+// maintaining here.
+function sendToChat(message) {
   let pane;
   try {
     pane = capturePane();
@@ -218,86 +238,106 @@ function ask() {
   execFileSync(TMUX, ["send-keys", "-t", SESSION, "Enter"]);
 }
 
-const ARM_TIMEOUT_MS = 20_000;
-const ARM_POLL_INTERVAL_MS = 400;
-const ARM_QUIET_MS = 700;
-
-// Pure decision step for the arm() watch loop: given the previous
-// pane/timing state and a fresh pane snapshot, says whether the pane just
-// changed, and whether it's been quiet long enough since its last change
-// to treat Flow's autotype as finished.
-export function nextWatchState({ lastPane, lastChangeAt }, pane, now, quietMs) {
-  if (pane !== lastPane) {
-    return { lastPane: pane, lastChangeAt: now, shouldSubmit: false };
-  }
-  return {
-    lastPane,
-    lastChangeAt,
-    shouldSubmit: lastChangeAt !== null && now - lastChangeAt >= quietMs,
-  };
+function ask() {
+  const message = process.argv.slice(3).join(" ").trim();
+  if (!message) return;
+  sendToChat(message);
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Watches for Wispr Flow's autotype to land and settle, then presses
-// Enter — the "lightweight way to auto-press Enter" `arm()`'s doc comment
-// promises, since Flow itself has no auto-submit setting. Bounded so a
-// dictation that never happens (or never finishes) just times out quietly
-// instead of leaving anything armed to fire later on its own.
-async function waitForDictationThenSubmit(baselinePane) {
-  const deadline = Date.now() + ARM_TIMEOUT_MS;
-  let state = { lastPane: baselinePane, lastChangeAt: null };
-
-  while (Date.now() < deadline) {
-    await sleep(ARM_POLL_INTERVAL_MS);
-
-    let pane;
-    try {
-      pane = capturePane();
-    } catch {
-      return;
-    }
-
-    state = nextWatchState(state, pane, Date.now(), ARM_QUIET_MS);
-    if (!state.shouldSubmit) continue;
-
-    // Re-check right before the one irreversible action — the pane could
-    // have changed again (a dialog, a crash) since the snapshot above.
-    if (!isAtChatPrompt(pane)) return;
-    execFileSync(TMUX, ["send-keys", "-t", SESSION, "Enter"]);
-    return;
+// Raw (not `--json`-wrapped-in-an-array — `read --json` is a single
+// object) snapshot of Superwhisper's latest transcription, used as an
+// opaque comparison token: `voice()` just needs to tell "a new one
+// appeared" from "nothing's landed yet", not parse anything here.
+function latestTranscriptSnapshot() {
+  try {
+    return execFileSync(SUPERWHISPER_BIN, ["read", "--json"], { encoding: "utf-8" });
+  } catch {
+    return "";
   }
 }
 
-// Entry point for a dictation tool that can only autotype into whatever
-// has keyboard focus (Wispr Flow): raise Pearl's window, refuse unless
-// she's actually at her chat prompt, arm speak-next, then watch for the
-// autotyped text to land and submit it.
-async function arm() {
+// `rawResult`, not `llmResult` — Pearl should get what Jay actually said,
+// not a mode's language-model cleanup pass (which, depending on how that
+// mode is configured, might not even be a local call).
+export function transcriptText(snapshot) {
+  try {
+    return (JSON.parse(snapshot)?.rawResult ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+// Run on key-down, before Superwhisper starts recording: refuses before
+// any audio is captured, same as `ask` refuses before typing anything.
+// Also pins the mode (if configured) and records what "nothing new yet"
+// looks like, so `voice()` can recognize this recording's transcript once
+// it lands instead of re-sending whatever was already in the history.
+function preflight() {
   let pane;
   try {
     pane = capturePane();
   } catch {
     speak("I'm not running, Boss.");
+    process.exitCode = 1;
     return;
   }
 
   if (!isAtChatPrompt(pane)) {
     speak("I'm stuck on a prompt, Boss. Check my window.");
+    process.exitCode = 1;
     return;
   }
 
-  openSessionInIterm(SESSION);
-  hush();
-  writeFileSync(SPEAK_NEXT_PATH, "");
-  await waitForDictationThenSubmit(pane);
+  if (SUPERWHISPER_MODE) {
+    try {
+      execFileSync(SUPERWHISPER_BIN, ["switch", SUPERWHISPER_MODE]);
+    } catch {
+      // Already on that mode, or Superwhisper isn't running yet — either
+      // way `start` below will be the thing that actually fails loudly.
+    }
+  }
+
+  writeFileSync(VOICE_BASELINE_PATH, latestTranscriptSnapshot());
+}
+
+const VOICE_TIMEOUT_MS = 10_000;
+const VOICE_POLL_INTERVAL_MS = 300;
+
+// Run on key-up, after Superwhisper has been told to stop: polls for the
+// just-finished transcription to show up, then sends it exactly like
+// `ask` would. Bounded so a recording that never produced a transcript
+// (silence, a dropped `start`) just times out instead of eventually
+// sending something stale.
+async function voice() {
+  let baseline;
+  try {
+    baseline = readFileSync(VOICE_BASELINE_PATH, "utf-8");
+  } catch {
+    return;
+  }
+  rmSync(VOICE_BASELINE_PATH, { force: true });
+
+  const deadline = Date.now() + VOICE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await sleep(VOICE_POLL_INTERVAL_MS);
+
+    const latest = latestTranscriptSnapshot();
+    if (!latest || latest === baseline) continue;
+
+    const text = transcriptText(latest);
+    if (text) sendToChat(text);
+    return;
+  }
 }
 
 const COMMANDS = {
   ask,
-  arm,
+  preflight,
+  voice,
   say: speakLastReply,
   hush,
 };

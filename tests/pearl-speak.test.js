@@ -4,8 +4,8 @@ import {
   cleanForSpeech,
   extractLastAssistantText,
   isAtChatPrompt,
-  nextWatchState,
   summarizeForSpeech,
+  transcriptText,
   truncateForSpeech,
 } from "../api/pearl-speak.js";
 
@@ -162,24 +162,17 @@ describe("isAtChatPrompt", () => {
   });
 });
 
-describe("nextWatchState", () => {
-  it("records a change and resets the quiet timer when the pane differs", () => {
-    const state = nextWatchState({ lastPane: "a", lastChangeAt: 100 }, "b", 500, 700);
-    expect(state).toEqual({ lastPane: "b", lastChangeAt: 500, shouldSubmit: false });
+describe("transcriptText", () => {
+  it("extracts rawResult from a superwhisper `read --json` snapshot", () => {
+    const snapshot = JSON.stringify({ rawResult: "  turn on the lights  ", llmResult: "Turn on the lights." });
+    expect(transcriptText(snapshot)).toBe("turn on the lights");
   });
 
-  it("doesn't submit while still within the quiet window", () => {
-    const state = nextWatchState({ lastPane: "b", lastChangeAt: 500 }, "b", 900, 700);
-    expect(state.shouldSubmit).toBe(false);
+  it("returns an empty string for invalid JSON", () => {
+    expect(transcriptText("not json")).toBe("");
   });
 
-  it("submits once the pane has been unchanged for the quiet window", () => {
-    const state = nextWatchState({ lastPane: "b", lastChangeAt: 500 }, "b", 1300, 700);
-    expect(state.shouldSubmit).toBe(true);
-  });
-
-  it("never submits if the pane has never changed from the baseline", () => {
-    const state = nextWatchState({ lastPane: "a", lastChangeAt: null }, "a", 10_000, 700);
-    expect(state.shouldSubmit).toBe(false);
+  it("returns an empty string when rawResult is missing", () => {
+    expect(transcriptText(JSON.stringify({ llmResult: "only this" }))).toBe("");
   });
 });

@@ -1,26 +1,70 @@
--- Push-to-talk glue for Pearl's voice input via Wispr Flow.
+-- Push-to-talk glue for Pearl's voice input via Superwhisper.
 --
--- Wispr Flow has no scriptable hook (see .plans/push-to-talk-wispr.md) — it
--- only autotypes into whatever has keyboard focus. This hotkey is the
--- preflight step: it raises Pearl's window, refuses to arm anything unless
--- she's actually sitting at her chat prompt, and starts the watcher that
--- presses Enter once Flow's dictation lands. It is a *separate* key from
--- Flow's own push-to-talk hotkey (set in Flow's own Settings → Shortcuts) —
--- the two are never meant to share one physical key.
+-- Superwhisper has a real CLI (installed separately — see
+-- .plans/push-to-talk-wispr.md): `start`/`stop` control recording in the
+-- running app, and `read --json` returns the latest transcript. That's
+-- enough to drive Pearl's chat the same way `ask` already does — no
+-- autotype, no window-focus dependency, no guessing at when dictation
+-- "landed".
+--
+-- IMPORTANT — do this in Superwhisper's own Settings before using this at
+-- all: its shipped default mode transcribes through Superwhisper's own
+-- CLOUD model and then cleans the result up with a cloud LLM call. That is
+-- not acceptable for this integration. Set up (or edit) a mode that uses a
+-- LOCAL voice model (a Whisper or Parakeet variant — NOT "S1-Voice") and is
+-- type "voice" (no language-model stage at all, not "message"/"Pro").
+-- Confirm by checking a recording afterward: `superwhisper read --json`
+-- should show a `modelName` that is NOT "S1-Voice (Cloud)", and no
+-- `languageModelName` field at all.
 --
 -- Setup:
---   1. require("pearl-ptt") from ~/.hammerspoon/init.lua (with this file on
---      Hammerspoon's require path — e.g. symlinked into ~/.hammerspoon/, or
---      add this repo's hammerspoon/ dir via package.path), or just paste
---      the body below into init.lua directly.
---   2. Set COMMANDCENTER_ROOT below to this repo's absolute path.
---   3. Pick a hotkey that's free and distinct from Flow's push-to-talk key.
---      F13 is the default — most keyboards have it unused.
---   4. Reload Hammerspoon's config (menu bar icon → Reload Config, or
---      hs.reload()).
+--   1. Set COMMANDCENTER_ROOT, NODE_BIN, and SUPERWHISPER_BIN below to
+--      match this machine (`which node` / `which superwhisper`, or for
+--      superwhisper specifically, ~/.local/bin/superwhisper if its
+--      install-cli.sh put it there).
+--   2. Once you've set up a local-only mode in Superwhisper, put its mode
+--      key here as PEARL_SUPERWHISPER_MODE so `preflight` pins it before
+--      every recording — otherwise it just uses whatever mode is already
+--      active, which could be a cloud one.
+--   3. Pick a hotkey that isn't bound to anything else. F13 is the
+--      default; most keyboards don't use it for anything.
+--   4. Reload Hammerspoon's config (menu bar icon → Reload Config).
 
 local COMMANDCENTER_ROOT = os.getenv("HOME") .. "/dev/commandcenter"
+local NODE_BIN = os.getenv("HOME") .. "/.asdf/shims/node"
+local SUPERWHISPER_BIN = os.getenv("HOME") .. "/.local/bin/superwhisper"
+local PEARL_SUPERWHISPER_MODE = "" -- e.g. "pearl-local", once that mode exists
 
-hs.hotkey.bind({}, "F13", function()
-  hs.task.new("/usr/bin/node", nil, { COMMANDCENTER_ROOT .. "/api/pearl-speak.js", "arm" }):start()
-end)
+local PEARL_SPEAK = COMMANDCENTER_ROOT .. "/api/pearl-speak.js"
+
+local function runPearlSpeak(args)
+  local fullArgs = { PEARL_SPEAK }
+  for _, a in ipairs(args) do
+    table.insert(fullArgs, a)
+  end
+  local task = hs.task.new(NODE_BIN, nil, fullArgs)
+  task:setEnvironment({
+    PEARL_SUPERWHISPER_BIN = SUPERWHISPER_BIN,
+    PEARL_SUPERWHISPER_MODE = PEARL_SUPERWHISPER_MODE,
+    PATH = "/usr/bin:/bin:/usr/sbin:/sbin",
+  })
+  task:start()
+  return task
+end
+
+local function pressed()
+  -- Synchronous on purpose: we need to know preflight passed before
+  -- telling Superwhisper to start recording at all.
+  local preflightTask = runPearlSpeak({ "preflight" })
+  preflightTask:waitUntilExit()
+  if preflightTask:terminationStatus() ~= 0 then return end
+
+  hs.execute("'" .. SUPERWHISPER_BIN .. "' start")
+end
+
+local function released()
+  hs.execute("'" .. SUPERWHISPER_BIN .. "' stop")
+  runPearlSpeak({ "voice" })
+end
+
+hs.hotkey.bind({}, "F13", pressed, released)
