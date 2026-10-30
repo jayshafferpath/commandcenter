@@ -98,23 +98,22 @@ hotkey — not after.
 
 ## What Jay has to do manually
 
-1. **Set up a local-only mode in Superwhisper before using this at all.**
-   Settings → pick/create a mode → voice model: a Whisper or Parakeet
-   variant (not S1-Voice) → mode type `voice`, no language model. Verify by
-   checking a real recording afterward: `superwhisper read --json` should
-   show a `modelName` that isn't `"S1-Voice (Cloud)"`, and no
-   `languageModelName` field at all.
-2. Note that mode's key (the `key` field in its JSON file under
-   `~/superwhisper/modes/`, or whatever Superwhisper's Settings UI shows)
-   and set it as `PEARL_SUPERWHISPER_MODE` in the Hammerspoon config.
-3. Install Hammerspoon (`brew install --cask hammerspoon`) and grant it
-   Accessibility permission when macOS prompts.
-4. Copy `hammerspoon/pearl-ptt.lua`'s contents into (or `require` it from)
-   `~/.hammerspoon/init.lua`, fixing `NODE_BIN`/`SUPERWHISPER_BIN` for this
-   machine if `which node` / the CLI install location differ from what's
-   hardcoded, and picking a hotkey not already in use (defaults to F13).
-5. Reload Hammerspoon's config.
-6. Deal with the cleanup noted above — the accidental cloud-transcribed
+1. ~~Set up a local-only mode in Superwhisper.~~ Done — `default` mode
+   (key `"default"`) uses a local Parakeet voice model
+   (`nvidia_parakeet-v2_476MB`) with no language-model stage, confirmed via
+   its JSON under `~/superwhisper/modes/`. `PEARL_SUPERWHISPER_MODE` in
+   `hammerspoon/pearl-ptt.lua` is set to `"default"` accordingly. (`pro` got
+   the same local voice model but still has a cloud language-model cleanup
+   stage — don't point this integration at it.)
+2. ~~Install Hammerspoon.~~ Done.
+3. `~/.hammerspoon/init.lua` is wired up to `require` this repo's
+   `hammerspoon/pearl-ptt.lua` directly (not a copy) — editing the file in
+   this repo is editing the live config. Still needed: open Hammerspoon
+   once and grant its Accessibility permission prompt when macOS shows it.
+4. Reload Hammerspoon's config after that (menu bar icon → Reload Config)
+   and confirm F13 (or whatever hotkey is chosen) is actually free on this
+   keyboard.
+5. Deal with the cleanup noted above — the accidental cloud-transcribed
    recording from testing is still local, and was already sent to
    Superwhisper's servers once.
 

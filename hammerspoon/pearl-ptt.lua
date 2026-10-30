@@ -33,7 +33,11 @@
 local COMMANDCENTER_ROOT = os.getenv("HOME") .. "/dev/commandcenter"
 local NODE_BIN = os.getenv("HOME") .. "/.asdf/shims/node"
 local SUPERWHISPER_BIN = os.getenv("HOME") .. "/.local/bin/superwhisper"
-local PEARL_SUPERWHISPER_MODE = "" -- e.g. "pearl-local", once that mode exists
+-- "default" mode (key "default") is set up with a local Parakeet voice
+-- model and no language-model stage — verified via its JSON under
+-- ~/superwhisper/modes/. "pro" has the same local voice model but still
+-- runs a cloud language-model cleanup pass; don't switch to that one here.
+local PEARL_SUPERWHISPER_MODE = "default"
 
 local PEARL_SPEAK = COMMANDCENTER_ROOT .. "/api/pearl-speak.js"
 
