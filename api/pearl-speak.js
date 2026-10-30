@@ -11,7 +11,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SESSION } from "./pearl.js";
+import { SESSION } from "./lib/pearl-session.js";
 
 const TMUX = "/opt/homebrew/bin/tmux";
 
@@ -293,11 +293,14 @@ function preflight() {
   }
 
   if (SUPERWHISPER_MODE) {
+    // Refuse rather than record: whatever mode is active instead could be
+    // a cloud one, and audio must never leave the machine.
     try {
       execFileSync(SUPERWHISPER_BIN, ["switch", SUPERWHISPER_MODE]);
     } catch {
-      // Already on that mode, or Superwhisper isn't running yet — either
-      // way `start` below will be the thing that actually fails loudly.
+      speak("I couldn't switch Superwhisper to local mode, Boss. Not recording.");
+      process.exitCode = 1;
+      return;
     }
   }
 

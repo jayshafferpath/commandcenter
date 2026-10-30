@@ -14,16 +14,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { openSessionInIterm } from "./run-command.js";
+import { PEARL_NAME, SESSION } from "./lib/pearl-session.js";
 
-// Configurable so the supervisor isn't stuck with the name "Pearl" on
-// someone else's install — her tmux session is named off the same value so
-// renaming doesn't collide with (or orphan) a session created under the old
-// name.
-export const PEARL_NAME = process.env.PEARL_NAME?.trim() || "Pearl";
-
-export const SESSION = `ccenter-${
-  PEARL_NAME.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "pearl"
-}`;
+export { PEARL_NAME, SESSION };
 
 export const SOUL_FILENAME = "SOUL.md";
 

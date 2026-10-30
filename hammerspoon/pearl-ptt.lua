@@ -26,8 +26,8 @@
 --      key here as PEARL_SUPERWHISPER_MODE so `preflight` pins it before
 --      every recording — otherwise it just uses whatever mode is already
 --      active, which could be a cloud one.
---   3. Pick a hotkey that isn't bound to anything else. F13 is the
---      default; most keyboards don't use it for anything.
+--   3. Pick a hotkey that isn't bound to anything else. Insert is the
+--      default; macOS reports a PC keyboard's Insert as "help".
 --   4. Reload Hammerspoon's config (menu bar icon → Reload Config).
 
 local COMMANDCENTER_ROOT = os.getenv("HOME") .. "/dev/commandcenter"
@@ -50,7 +50,12 @@ local function runPearlSpeak(args)
   task:setEnvironment({
     PEARL_SUPERWHISPER_BIN = SUPERWHISPER_BIN,
     PEARL_SUPERWHISPER_MODE = PEARL_SUPERWHISPER_MODE,
-    PATH = "/usr/bin:/bin:/usr/sbin:/sbin",
+    -- The CLI assumes ~/Documents/superwhisper; the app's data lives in
+    -- ~/superwhisper here (its appFolderDirectory default).
+    SUPERWHISPER_MODES = os.getenv("HOME") .. "/superwhisper/modes",
+    HOME = os.getenv("HOME"),
+    -- The asdf node shim execs `asdf`, which lives in Homebrew.
+    PATH = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
   })
   task:start()
   return task
@@ -71,4 +76,4 @@ local function released()
   runPearlSpeak({ "voice" })
 end
 
-hs.hotkey.bind({}, "F13", pressed, released)
+hs.hotkey.bind({}, "help", pressed, released)
