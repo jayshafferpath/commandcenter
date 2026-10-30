@@ -21,7 +21,7 @@ import { openSessionInIterm } from "./run-command.js";
 // name.
 export const PEARL_NAME = process.env.PEARL_NAME?.trim() || "Pearl";
 
-const SESSION = `ccenter-${
+export const SESSION = `ccenter-${
   PEARL_NAME.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "pearl"
 }`;
 
@@ -114,7 +114,7 @@ function ensureSession({ cwd, apiBase, repoRoot }) {
     // instead of her having to poll /api/jobs for them.
     "--name",
     PEARL_NAME,
-    // Speaks her replies aloud (pearl-speak.js).
+    // Caches her replies for on-demand speech (pearl-speak.js).
     "--settings",
     speechSettings(repoRoot),
   ]);
