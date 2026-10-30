@@ -140,13 +140,24 @@ function speak(text) {
   // Siri voices aren't addressable via `say -v`; omitting -v uses the system voice set in Spoken Content.
   const voice = process.env.PEARL_VOICE?.trim();
   const rate = process.env.PEARL_SPEECH_RATE?.trim() || "210";
+  // `say` has no volume flag; the embedded [[volm]] command is the only knob.
+  const volume = process.env.PEARL_SPEECH_VOLUME?.trim() || "0.4";
+  const tone = process.env.PEARL_SPEECH_TONE?.trim() || "/System/Library/Sounds/Hero.aiff";
   const voiceArgs = voice ? ["-v", voice] : [];
+
+  // Sync so the tone finishes before speech starts; a missing sound file
+  // shouldn't cost the message itself.
+  try {
+    execFileSync("/usr/bin/afplay", ["-v", volume, tone]);
+    execFileSync("/usr/bin/afplay", ["-v", volume, tone]);
+  } catch {}
+
   const child = spawn("/usr/bin/say", [...voiceArgs, "-r", rate], {
     detached: true,
     stdio: ["pipe", "ignore", "ignore"],
   });
   writeFileSync(SAY_PID_PATH, String(child.pid));
-  child.stdin.write(text);
+  child.stdin.write(`[[volm ${volume}]] ${text}`);
   child.stdin.end();
   child.unref();
 }
