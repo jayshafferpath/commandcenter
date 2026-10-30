@@ -149,7 +149,6 @@ function speak(text) {
   // shouldn't cost the message itself.
   try {
     execFileSync("/usr/bin/afplay", ["-v", volume, tone]);
-    execFileSync("/usr/bin/afplay", ["-v", volume, tone]);
   } catch {}
 
   const child = spawn("/usr/bin/say", [...voiceArgs, "-r", rate], {
