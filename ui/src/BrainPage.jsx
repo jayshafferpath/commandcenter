@@ -82,6 +82,10 @@ export function BrainPage({ jobId }) {
 
   const content = live?.content ?? "";
   const { html, mermaidBlocks } = useMemo(() => renderCanvas(content), [content]);
+  // React resets innerHTML whenever this object's identity changes, not just its
+  // string — a fresh object on every poll would wipe the SVGs mermaid drew into
+  // the placeholders, with nothing re-running to draw them again.
+  const markup = useMemo(() => ({ __html: html }), [html]);
   const bodyRef = useRef(null);
 
   useEffect(() => {
@@ -124,7 +128,7 @@ export function BrainPage({ jobId }) {
 
         {error && <div className="brain-panel-error">{error}</div>}
 
-        <div className="brain-panel-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
+        <div className="brain-panel-body" ref={bodyRef} dangerouslySetInnerHTML={markup} />
       </div>
     </div>
   );
