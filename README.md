@@ -61,3 +61,23 @@ Who Pearl is and how you want her to work, kept separate from the
 mechanical API briefing (`api/pearl.js`) so personality/preferences don't
 require editing code. Edit it from the dashboard's Pearl tab, or directly —
 it's read fresh every time she spins up.
+
+## Slack PR announcements
+
+Set `SLACK_WORKFLOW_URL_PR_ANNOUNCE` to a Slack Workflow Builder trigger URL
+(`hooks.slack.com/triggers/...`) to post every PR you author to a Slack
+channel, exactly once. Unset, the feature is off. The server polls every 5
+minutes (plus once at startup) and POSTs a flat JSON payload — the Slack
+workflow owns the channel and the message formatting, so declare these four
+input variables on the trigger:
+
+- `title` — PR title
+- `url` — PR URL
+- `repo` — `owner/name`
+- `number` — PR number (as a string)
+
+Drafts are skipped until they're marked ready for review. Idempotency state
+lives at `~/.commandcenter/slack-posted-prs.json`, keyed by PR URL — turning
+the feature on for the first time seeds this file with every currently open
+authored PR (drafts included) without posting any of them, so it doesn't
+blast your existing backlog into Slack.

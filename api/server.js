@@ -27,6 +27,7 @@ import {
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
+import { startPrAnnouncementPoll } from "./lib/slack-pr-announce.js";
 
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
@@ -52,6 +53,8 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = Fastify({ logger: true });
 
 await app.register(cors, { origin: true });
+
+startPrAnnouncementPoll({ log: app.log });
 
 const TICKET_FIELDS = [
   "key",
