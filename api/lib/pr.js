@@ -91,6 +91,33 @@ export function searchMyPrs({ role = "author", state = "open", limit = 30 } = {}
   }
 }
 
+const PR_URL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+$/;
+
+export function isPrUrl(url) {
+  return typeof url === "string" && PR_URL.test(url);
+}
+
+// Any PR by URL, not just ones searchMyPrs would find. The URL is
+// interpolated into a shell command, so anything that isn't strictly a
+// GitHub PR URL is rejected before it gets near execSync. repo comes from
+// the URL rather than headRepository, which names the fork on a fork PR.
+export function viewPr(url) {
+  if (!isPrUrl(url)) return null;
+  const result = run(`gh pr view '${url}' --json title,url,number`);
+  if (!result) return null;
+  try {
+    const pr = JSON.parse(result);
+    return {
+      title: pr.title,
+      url: pr.url,
+      number: pr.number,
+      repo: url.match(PR_URL)[1],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function pushBranch(branch, cwd, force = false) {
   const flag = force ? "--force-with-lease" : "-u";
   const result = run(`git push ${flag} origin ${branch}`, cwd);

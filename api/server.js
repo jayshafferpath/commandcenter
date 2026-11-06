@@ -13,7 +13,7 @@ import {
   getCurrentUser,
   transitionForEvent,
 } from "./lib/jira.js";
-import { searchMyPrs } from "./lib/pr.js";
+import { isPrUrl, searchMyPrs, viewPr } from "./lib/pr.js";
 import { adfToPlainText } from "./lib/adf.js";
 import { isExecutionEnabled } from "./lib/dashboard-actions.js";
 import {
@@ -29,6 +29,7 @@ import { brainInstructions, canvasPathFor, ensureBrainDir, readBrain } from "./b
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
+import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
 
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
@@ -244,6 +245,7 @@ app.get("/api/prs", async () => {
       else byUrl.set(pr.url, { pr, roles: ["assignee"] });
     }
 
+    const postedUrls = isAnnounceConfigured() ? loadPostedUrls() : new Set();
     const prs = [...byUrl.values()].map(({ pr, roles }) => ({
       repo: pr.repository?.nameWithOwner || null,
       number: pr.number,
@@ -252,10 +254,48 @@ app.get("/api/prs", async () => {
       isDraft: pr.isDraft,
       updatedAt: pr.updatedAt,
       roles,
+      isAnnounced: postedUrls.has(pr.url),
     }));
 
-    return { ok: true, prs };
+    return { ok: true, prs, announceEnabled: isAnnounceConfigured() };
   } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// Posts one PR to the Slack announce workflow, on demand only. Safe to call
+// twice: a PR already posted comes back alreadyPosted without a second post.
+app.post("/api/prs/announce", async (request, reply) => {
+  const { url } = request.body || {};
+  if (!isPrUrl(url)) {
+    reply.code(400);
+    return { ok: false, error: "url must be a GitHub PR URL (https://github.com/owner/repo/pull/N)" };
+  }
+  if (!isExecutionEnabled()) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: "Posting is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.",
+    };
+  }
+  if (!isAnnounceConfigured()) {
+    reply.code(400);
+    return { ok: false, error: "SLACK_WORKFLOW_URL_PR_ANNOUNCE is not set" };
+  }
+
+  const pr = viewPr(url);
+  if (!pr) {
+    reply.code(404);
+    return { ok: false, error: `Couldn't load ${url} via gh` };
+  }
+
+  try {
+    const result = await announcePr(pr);
+    request.log.info(`Slack PR announce ${result}: ${url}`);
+    return { ok: true, alreadyPosted: result === "already_posted" };
+  } catch (err) {
+    request.log.error(err, `Slack PR announce failed: ${url}`);
+    reply.code(502);
     return { ok: false, error: err.message };
   }
 });

@@ -10,8 +10,52 @@ import { useCallback, useEffect, useState } from "react";
 
 const ROLE_LABEL = { author: "mine", assignee: "assigned" };
 
+// On demand only: a PR is posted when this is clicked, never automatically.
+// The server refuses a repeat, so this just reflects isAnnounced back.
+function AnnounceButton({ pr, onAnnounced, onError }) {
+  const [posting, setPosting] = useState(false);
+
+  if (pr.isAnnounced) {
+    return <span className="focus-item-status">posted</span>;
+  }
+
+  const announce = async () => {
+    setPosting(true);
+    try {
+      const res = await fetch("/api/prs/announce", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: pr.url }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        onError(data.error);
+        return;
+      }
+      onAnnounced(pr.url);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className="focus-item-spawn-btn"
+      title="Post this PR to Slack"
+      disabled={posting}
+      onClick={announce}
+    >
+      {posting ? "posting…" : "post"}
+    </button>
+  );
+}
+
 export function PrColumn() {
   const [prs, setPrs] = useState([]);
+  const [announceEnabled, setAnnounceEnabled] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchPrs = useCallback(async () => {
@@ -24,6 +68,7 @@ export function PrColumn() {
       }
       setError(null);
       setPrs(data.prs || []);
+      setAnnounceEnabled(Boolean(data.announceEnabled));
     } catch (err) {
       setError(err.message);
     }
@@ -34,6 +79,9 @@ export function PrColumn() {
     const interval = setInterval(fetchPrs, 60000);
     return () => clearInterval(interval);
   }, [fetchPrs]);
+
+  const markAnnounced = (url) =>
+    setPrs((current) => current.map((pr) => (pr.url === url ? { ...pr, isAnnounced: true } : pr)));
 
   return (
     <div className="focus-column focus-column--prs">
@@ -66,6 +114,9 @@ export function PrColumn() {
                   {ROLE_LABEL[role] || role}
                 </span>
               ))}
+              {announceEnabled && (
+                <AnnounceButton pr={pr} onAnnounced={markAnnounced} onError={setError} />
+              )}
             </div>
           </div>
         ))}
