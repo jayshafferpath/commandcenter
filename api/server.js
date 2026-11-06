@@ -25,14 +25,7 @@ import {
   serializeJob,
   startCommandJob,
 } from "./run-command.js";
-import {
-  brainInstructions,
-  canvasPathFor,
-  ensureBrainDir,
-  listSnapshots,
-  readBrain,
-  readSnapshot,
-} from "./brain.js";
+import { brainInstructions, canvasPathFor, ensureBrainDir, readBrain } from "./brain.js";
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
@@ -186,7 +179,7 @@ app.get("/api/jobs/:id", async (request, reply) => {
   return { ok: true, job: serializeJob(job, { includeLog: true }) };
 });
 
-// Brain View's current canvas — polled by the dashboard while a panel is
+// Brain View's current canvas — polled by the dashboard while its page is
 // open. 404s the same way a missing job does, both when the job itself is
 // unknown and when it never had brain: true set (no brain dir on disk).
 app.get("/api/jobs/:id/brain", async (request, reply) => {
@@ -201,29 +194,6 @@ app.get("/api/jobs/:id/brain", async (request, reply) => {
     return { ok: false, error: "This job has no brain canvas" };
   }
   return { ok: true, ...brain };
-});
-
-app.get("/api/jobs/:id/brain/snapshots", async (request, reply) => {
-  const job = getJob(request.params.id);
-  if (!job) {
-    reply.code(404);
-    return { ok: false, error: "Unknown job" };
-  }
-  return { ok: true, snapshots: listSnapshots(job.id) };
-});
-
-app.get("/api/jobs/:id/brain/snapshots/:ts", async (request, reply) => {
-  const job = getJob(request.params.id);
-  if (!job) {
-    reply.code(404);
-    return { ok: false, error: "Unknown job" };
-  }
-  const snapshot = readSnapshot(job.id, request.params.ts);
-  if (!snapshot) {
-    reply.code(404);
-    return { ok: false, error: "Unknown snapshot" };
-  }
-  return { ok: true, ...snapshot };
 });
 
 // Opens a real iTerm2 window on this machine, attached to the job's tmux
