@@ -51,7 +51,8 @@ function briefing({ apiBase, repoRoot }) {
   const technical = [
     `You are ${PEARL_NAME}, the supervisor agent for the Command Center dashboard.`,
     `Command Center's REST API is at ${apiBase}.`,
-    "Key endpoints: GET /api/tickets (tickets, with each ticket's current classification), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}}) to start a new agent.",
+    "Key endpoints: GET /api/tickets (tickets, with each ticket's current classification), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}, brain}) to start a new agent.",
+    "Pass brain: true on /api/dispatch when Jay asks you to use the brain view, show your thinking, or sketch something out — it gives the dispatched agent a live canvas (GET /api/jobs/:id/brain) it rewrites as it works, which the dashboard renders next to the session. Leave it off otherwise; it's opt-in so idle sessions don't fill it with narration nobody asked for.",
     `You also have this repo checked out at ${repoRoot}, with api/lib/jira.js exporting searchIssues/getIssue/editIssue/addLabel/removeLabel/transitionForEvent/createIssue/getCurrentUser — use those (via a short node -e snippet) for anything the REST API doesn't cover: editing a ticket's summary, labels, status, or due date directly.`,
     "Dispatched agents message you directly via the SendMessage tool when they finish or get stuck — expect these without polling /api/jobs yourself.",
   ].join(" ");

@@ -1,6 +1,7 @@
 import { loadEnv } from "./lib/env.js";
 loadEnv();
 
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
@@ -24,6 +25,14 @@ import {
   serializeJob,
   startCommandJob,
 } from "./run-command.js";
+import {
+  brainInstructions,
+  canvasPathFor,
+  ensureBrainDir,
+  listSnapshots,
+  readBrain,
+  readSnapshot,
+} from "./brain.js";
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
@@ -177,6 +186,46 @@ app.get("/api/jobs/:id", async (request, reply) => {
   return { ok: true, job: serializeJob(job, { includeLog: true }) };
 });
 
+// Brain View's current canvas — polled by the dashboard while a panel is
+// open. 404s the same way a missing job does, both when the job itself is
+// unknown and when it never had brain: true set (no brain dir on disk).
+app.get("/api/jobs/:id/brain", async (request, reply) => {
+  const job = getJob(request.params.id);
+  if (!job) {
+    reply.code(404);
+    return { ok: false, error: "Unknown job" };
+  }
+  const brain = readBrain(job.id);
+  if (!brain) {
+    reply.code(404);
+    return { ok: false, error: "This job has no brain canvas" };
+  }
+  return { ok: true, ...brain };
+});
+
+app.get("/api/jobs/:id/brain/snapshots", async (request, reply) => {
+  const job = getJob(request.params.id);
+  if (!job) {
+    reply.code(404);
+    return { ok: false, error: "Unknown job" };
+  }
+  return { ok: true, snapshots: listSnapshots(job.id) };
+});
+
+app.get("/api/jobs/:id/brain/snapshots/:ts", async (request, reply) => {
+  const job = getJob(request.params.id);
+  if (!job) {
+    reply.code(404);
+    return { ok: false, error: "Unknown job" };
+  }
+  const snapshot = readSnapshot(job.id, request.params.ts);
+  if (!snapshot) {
+    reply.code(404);
+    return { ok: false, error: "Unknown snapshot" };
+  }
+  return { ok: true, ...snapshot };
+});
+
 // Opens a real iTerm2 window on this machine, attached to the job's tmux
 // session. Only meaningful when the browser and the dashboard server are on
 // the same Mac — same trust model as the rest of this app.
@@ -306,7 +355,7 @@ app.post("/api/todos/:key/complete", async (request, reply) => {
 // Dispatch a free-form agent, scoped to whatever is focused (a ticket, or
 // nothing). Gated the same way as the rest of the dashboard's write actions.
 app.post("/api/dispatch", async (request, reply) => {
-  const { prompt, context, mode } = request.body || {};
+  const { prompt, context, mode, brain } = request.body || {};
   if (!prompt) {
     reply.code(400);
     return { ok: false, error: "prompt is required" };
@@ -420,13 +469,29 @@ app.post("/api/dispatch", async (request, reply) => {
     }
   }
 
+  // The id is generated here, ahead of startCommandJob, only when brain is
+  // on — the brain dir's path has to be baked into both composedPrompt (so
+  // the agent knows where to write) and the claude invocation's --add-dir
+  // (so it's allowed to) before the job/tmux session exists. Everything
+  // else still lets startCommandJob mint its own id.
+  let jobId;
+  let extraArgs = "";
+  if (brain) {
+    jobId = randomUUID();
+    const brainDir = ensureBrainDir(jobId);
+    composedPrompt = `${composedPrompt}\n\n${brainInstructions(canvasPathFor(jobId))}`;
+    extraArgs = `--add-dir '${brainDir}'`;
+  }
+
   const job = startCommandJob({
+    ...(jobId ? { id: jobId } : {}),
     ticketKey,
     title,
     prompt: composedPrompt,
     cwd,
     now: new Date().toISOString(),
     mode: mode || "headless",
+    extraArgs,
   });
 
   return { ok: true, job: serializeJob(job) };

@@ -23,6 +23,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { hasBrainDir } from "./brain.js";
 
 const MAX_LOG_CHARS = 100_000;
 const SESSION_PREFIX = "ccenter-";
@@ -101,11 +102,16 @@ function metaFilePath(id) {
 // --permission-mode auto (not acceptEdits) — same mode Pearl runs in, so
 // every spawned agent (headless, interactive, or Pearl herself) behaves
 // consistently rather than each path having its own permission posture.
-function innerCommand({ promptFile, exitFile, mode }) {
+//
+// extraArgs is a pre-quoted string fragment (e.g. `--add-dir '/path'`), not
+// an array — it's spliced into a shell string built by this same function,
+// so the caller quotes it the same way promptFile/exitFile already are.
+function innerCommand({ promptFile, exitFile, mode, extraArgs = "" }) {
+  const suffix = extraArgs ? ` ${extraArgs}` : "";
   if (mode === "interactive") {
-    return `claude "$(cat '${promptFile}')" --permission-mode auto`;
+    return `claude "$(cat '${promptFile}')" --permission-mode auto${suffix}`;
   }
-  return `claude -p "$(cat '${promptFile}')" --permission-mode auto; echo $? > '${exitFile}'`;
+  return `claude -p "$(cat '${promptFile}')" --permission-mode auto${suffix}; echo $? > '${exitFile}'`;
 }
 
 function writeMetaFile(id, meta) {
@@ -227,8 +233,24 @@ setInterval(pollRunningJobs, POLL_INTERVAL_MS);
 // `cwd` is the ticket's resolved repo root: these commands operate on branches
 // and worktrees, so running them from the dashboard's own directory would
 // target the wrong repo.
-export function startCommandJob({ ticketKey, title, prompt, cwd, now, mode = "headless" }) {
-  const id = randomUUID();
+//
+// `id` is optional — the caller passes one in when it needs the job's id
+// before the job exists (brain: true needs the id to build the brain dir
+// path that goes into both composedPrompt and extraArgs before this is
+// called). Defaults to a fresh uuid otherwise.
+//
+// `extraArgs` is a pre-quoted shell string fragment appended to the `claude`
+// invocation (currently just `--add-dir` for brain: true).
+export function startCommandJob({
+  id = randomUUID(),
+  ticketKey,
+  title,
+  prompt,
+  cwd,
+  now,
+  mode = "headless",
+  extraArgs = "",
+}) {
   const session = sessionNameFor(id);
 
   const job = {
@@ -261,7 +283,7 @@ export function startCommandJob({ ticketKey, title, prompt, cwd, now, mode = "he
       cwd,
       "bash",
       "-c",
-      innerCommand({ promptFile: promptFilePath(id), exitFile: exitFilePath(id), mode }),
+      innerCommand({ promptFile: promptFilePath(id), exitFile: exitFilePath(id), mode, extraArgs }),
     ]);
     // Without this, tmux kills the pane the instant the inner command exits —
     // attaching a few seconds late would show nothing, and the final output
@@ -275,11 +297,14 @@ export function startCommandJob({ ticketKey, title, prompt, cwd, now, mode = "he
 }
 
 // Serializable view of a job. The log is only included on request so the job
-// list stays small.
+// list stays small. hasBrain is checked on disk rather than tracked on the
+// job object — it survives an API restart (syncJobsFromTmux adopts a job
+// with no meta file) the same way the brain dir itself does.
 export function serializeJob(job, { includeLog = false } = {}) {
   if (!job) return null;
   const { log, ...rest } = job;
-  return includeLog ? { ...rest, log } : rest;
+  const withBrain = { ...rest, hasBrain: hasBrainDir(job.id) };
+  return includeLog ? { ...withBrain, log } : withBrain;
 }
 
 export function getJob(id) {

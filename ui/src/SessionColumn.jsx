@@ -1,9 +1,13 @@
 // Live/past agent runs, as a feed of closed cards — no expand, no inline
 // log. A session's whole reason for existing here is "jump to it or don't";
-// the log itself lives in the actual tmux pane, one click away.
+// the log itself lives in the actual tmux pane, one click away. The one
+// opt-in exception is Brain View: a card for a session dispatched with
+// brain: true gets a button that opens its canvas, since that's content
+// meant to be read here, not in the pane.
 
 import { useEffect, useState } from "react";
 import { StatusIcon } from "./StatusIcon.jsx";
+import { BrainPanel } from "./BrainPanel.jsx";
 
 function useOpenInIterm(jobId) {
   const [state, setState] = useState("idle"); // idle | opening | error
@@ -48,6 +52,7 @@ export function OpenInIterm({ jobId }) {
 function SessionCard({ job, onClose }) {
   const { state, error, open } = useOpenInIterm(job.id);
   const [closing, setClosing] = useState(false);
+  const [brainOpen, setBrainOpen] = useState(false);
   const title = job.title || job.ticketKey || "General dispatch";
   const canOpen = Boolean(job.tmuxSession);
 
@@ -91,6 +96,19 @@ function SessionCard({ job, onClose }) {
         )}
         {state === "opening" && <span className="session-opening">opening…</span>}
       </button>
+      {job.hasBrain && (
+        <button
+          type="button"
+          className="session-brain"
+          title="Open this session's brain view"
+          onClick={(e) => {
+            e.stopPropagation();
+            setBrainOpen(true);
+          }}
+        >
+          🧠
+        </button>
+      )}
       <button
         type="button"
         className="session-close"
@@ -100,6 +118,9 @@ function SessionCard({ job, onClose }) {
       >
         ✕
       </button>
+      {brainOpen && (
+        <BrainPanel jobId={job.id} title={title} onClose={() => setBrainOpen(false)} />
+      )}
     </div>
   );
 }
