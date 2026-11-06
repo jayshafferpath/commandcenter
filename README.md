@@ -65,19 +65,21 @@ it's read fresh every time she spins up.
 ## Slack PR announcements
 
 Set `SLACK_WORKFLOW_URL_PR_ANNOUNCE` to a Slack Workflow Builder trigger URL
-(`hooks.slack.com/triggers/...`) to post every PR you author to a Slack
-channel, exactly once. Unset, the feature is off. The server polls every 5
-minutes (plus once at startup) and POSTs a flat JSON payload — the Slack
-workflow owns the channel and the message formatting, so declare these four
-input variables on the trigger:
+(`hooks.slack.com/triggers/...`) to post PRs to a Slack channel on demand.
+Unset, the feature is off. Nothing posts automatically: each PR card gets a
+**post** button, and Pearl can post one when asked
+(`POST /api/prs/announce` with `{ "url": "<PR URL>" }`). It sends a flat JSON
+payload — the Slack workflow owns the channel and the message formatting.
+The existing workflow declares a single `text` input; a workflow that wants
+to lay out the message itself can use the other fields instead:
 
+- `text` — `:pr-review-request: <title>` plus the PR URL on the next line
 - `title` — PR title
 - `url` — PR URL
 - `repo` — `owner/name`
 - `number` — PR number (as a string)
 
-Drafts are skipped until they're marked ready for review. Idempotency state
-lives at `~/.commandcenter/slack-posted-prs.json`, keyed by PR URL — turning
-the feature on for the first time seeds this file with every currently open
-authored PR (drafts included) without posting any of them, so it doesn't
-blast your existing backlog into Slack.
+Each PR posts at most once. Posted PRs are recorded by URL in
+`~/.commandcenter/slack-posted-prs.json`; asking again for one already there
+returns `alreadyPosted` without posting. Requires
+`DASHBOARD_ALLOW_ACTIONS=true`, like the dashboard's other write actions.
