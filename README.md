@@ -36,12 +36,18 @@ Starts the API (port 3789) and the Vite dev server (port 5173). Open
 
 ```
 api/
-  server.js        Fastify REST API — tickets, todos, PRs, jobs, dispatch
+  server.js         Fastify REST API — tickets, todos, PRs, jobs, dispatch
   pearl.js          The supervisor agent: ensures her tmux session exists,
                      opens a real terminal into her
+  pearl-speak.js    Pearl's on-demand speech and push-to-talk input
   run-command.js    Spawns dispatched agents in their own tmux sessions,
                      tracks them as jobs
-  lib/              Jira REST client, label/stack helpers, ADF→text, etc.
+  brain.js          Per-job Brain View canvas storage
+  lib/              Jira REST client, label/stack helpers, ADF→text,
+                     Slack PR announce, etc.
+commands/           Claude Code commands symlinked into ~/.claude/commands
+                     by install.sh (currently /automodel)
+hammerspoon/        Push-to-talk hotkey glue for Pearl
 ui/                 React dashboard (Vite)
 tests/              Vitest suite for api/ and ui/ pure logic
 ```
@@ -55,12 +61,51 @@ By default, write actions (dispatching an agent, running Pearl) are
 disabled — the dashboard shows what it *would* run as copy-to-clipboard
 only. Set `DASHBOARD_ALLOW_ACTIONS=true` to let it actually run them.
 
+## Dispatch
+
+`POST /api/dispatch` with `{ prompt, context, mode, brain }` starts an
+agent in its own tmux session. `context` is `{ type: "ticket", key }` or
+`{ type: "none" }`; a ticket dispatch prepends the ticket's full detail and
+runs in the repo resolved from its labels or description, falling back to
+`DEV_ROOT`. `mode` is `headless` (the default) or `interactive`. One
+running job per ticket; a second dispatch returns 409.
+
+Every dispatched prompt starts with `/automodel`
+(`commands/automodel.md`), so the agent picks haiku, sonnet, or opus for
+the task before starting it, and ends with an instruction to report back to
+Pearl via `SendMessage`.
+
+## Brain View
+
+Pass `brain: true` on dispatch to give the agent a live canvas at
+`~/.commandcenter/brain/<jobId>/canvas.md`, which it rewrites as it works.
+The dashboard renders it on its own page (markdown plus Mermaid), served
+from `GET /api/jobs/:id/brain`. Opt-in, so sessions that weren't asked to
+show their thinking don't fill it with narration.
+
 ## SOUL.md
 
 Who Pearl is and how you want her to work, kept separate from the
 mechanical API briefing (`api/pearl.js`) so personality/preferences don't
 require editing code. Edit it from the dashboard's Pearl tab, or directly —
-it's read fresh every time she spins up.
+it's read fresh every time she spins up. The ↻ button next to her name
+restarts her session so edits take effect, discarding her current
+conversation.
+
+Pearl runs pinned to Opus in `auto` permission mode, named `PEARL_NAME` so
+dispatched agents can reach her with `SendMessage`.
+
+## Pearl's voice
+
+A Stop hook, scoped to Pearl's session only, caches a condensed version of
+each reply. `api/pearl-speak.js` speaks it on demand (`say`), stops it
+(`hush`), and handles voice input: `ask "<text>"` from any dictation tool,
+or the `preflight`/`voice` push-to-talk pair driven by Superwhisper's CLI
+through `hammerspoon/pearl-ptt.lua` (held Insert key). Superwhisper must be
+on a local-only mode; see `.plans/push-to-talk-wispr.md` for why and how.
+
+Optional env: `PEARL_VOICE`, `PEARL_SPEECH_RATE`, `PEARL_SPEECH_VOLUME`,
+`PEARL_SPEECH_TONE`, `PEARL_SUPERWHISPER_BIN`, `PEARL_SUPERWHISPER_MODE`.
 
 ## Slack PR announcements
 

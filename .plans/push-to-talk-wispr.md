@@ -111,8 +111,8 @@ hotkey — not after.
    this repo is editing the live config. Still needed: open Hammerspoon
    once and grant its Accessibility permission prompt when macOS shows it.
 4. Reload Hammerspoon's config after that (menu bar icon → Reload Config)
-   and confirm F13 (or whatever hotkey is chosen) is actually free on this
-   keyboard.
+   and confirm Insert (reported by macOS as `help`, the hotkey bound in
+   `pearl-ptt.lua`) is actually free on this keyboard.
 5. Deal with the cleanup noted above — the accidental cloud-transcribed
    recording from testing is still local, and was already sent to
    Superwhisper's servers once.
