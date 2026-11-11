@@ -29,7 +29,7 @@ import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pear
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
-import { createMemory, findMemoryBin, MemoryError, MemoryExistsError } from "./lib/pearl-memory.js";
+import { createMemory, findMemoryBin, MemoryError, MemoryExistsError, MemoryNotFoundError } from "./lib/pearl-memory.js";
 
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
@@ -353,7 +353,7 @@ app.post("/api/todos/:key/complete", async (request, reply) => {
 // Pearl's memory (see api/lib/pearl-memory.js). The binary is looked up per
 // request so installing it doesn't need an API restart; the instance is
 // cached per binary so every write shares one queue.
-const MEMORY_LIMITS = { query: 500, title: 120, content: 20_000, identifier: 300, results: 25 };
+const MEMORY_LIMITS = { query: 500, title: 120, content: 20_000, identifier: 300, results: 25, listPage: 1000, listLimit: 100 };
 let memoryInstance = null;
 
 function getMemory() {
@@ -371,6 +371,10 @@ function memoryUnavailable(reply) {
 function memoryFailure(request, reply, err) {
   if (err instanceof MemoryExistsError) {
     reply.code(409);
+    return { ok: false, error: err.message };
+  }
+  if (err instanceof MemoryNotFoundError) {
+    reply.code(404);
     return { ok: false, error: err.message };
   }
   request.log.error(err, "Pearl memory call failed");
@@ -438,6 +442,65 @@ app.post("/api/memory", async (request, reply) => {
   if (!memory) return memoryUnavailable(reply);
   try {
     return { ok: true, ...(await memory.write({ title, content, overwrite })) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
+app.get("/api/memory/notes", async (request, reply) => {
+  const { page = "1", limit = "20" } = request.query || {};
+  const pageNum = Number.parseInt(page, 10);
+  if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > MEMORY_LIMITS.listPage) {
+    reply.code(400);
+    return { ok: false, error: `page must be between 1 and ${MEMORY_LIMITS.listPage}` };
+  }
+  const limitNum = Number.parseInt(limit, 10);
+  if (!Number.isInteger(limitNum) || limitNum < 1 || limitNum > MEMORY_LIMITS.listLimit) {
+    reply.code(400);
+    return { ok: false, error: `limit must be between 1 and ${MEMORY_LIMITS.listLimit}` };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, ...(await memory.list({ page: pageNum, limit: limitNum })) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
+app.put("/api/memory/note", async (request, reply) => {
+  const { id } = request.query || {};
+  if (!isBoundedString(id, MEMORY_LIMITS.identifier)) {
+    reply.code(400);
+    return { ok: false, error: "id is required — a permalink from search results" };
+  }
+  const { content } = request.body || {};
+  if (!isBoundedString(content, MEMORY_LIMITS.content)) {
+    reply.code(400);
+    return { ok: false, error: `content is required (at most ${MEMORY_LIMITS.content} characters)` };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, ...(await memory.update({ identifier: id, content })) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
+app.delete("/api/memory/note", async (request, reply) => {
+  const { id } = request.query || {};
+  if (!isBoundedString(id, MEMORY_LIMITS.identifier)) {
+    reply.code(400);
+    return { ok: false, error: "id is required — a permalink from search results" };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, ...(await memory.remove({ identifier: id })) };
   } catch (err) {
     return memoryFailure(request, reply, err);
   }

@@ -12,10 +12,13 @@ vi.mock("node:os", async (importOriginal) => {
 
 const {
   createMemory,
+  deleteArgs,
   findMemoryBin,
+  listArgs,
   MEMORY_FOLDER,
   MemoryError,
   MemoryExistsError,
+  MemoryNotFoundError,
   memoryEnv,
   memoryRoot,
   readArgs,
@@ -115,6 +118,18 @@ describe("CLI args", () => {
   it("reads by permalink", () => {
     expect(readArgs({ identifier: "main/pearl/headless" })).toEqual([
       "tool", "read", "--local", "--json", "main/pearl/headless",
+    ]);
+  });
+
+  it("lists the pearl folder, paginated", () => {
+    expect(listArgs({ page: 2, limit: 20 })).toEqual([
+      "tool", "list", MEMORY_FOLDER, "--page", "2", "--page-size", "20", "--local", "--json",
+    ]);
+  });
+
+  it("deletes by permalink", () => {
+    expect(deleteArgs({ identifier: "main/pearl/headless" })).toEqual([
+      "tool", "delete", "--identifier", "main/pearl/headless", "--local", "--json",
     ]);
   });
 });
@@ -248,5 +263,130 @@ describe("createMemory", () => {
       execFileAsync: vi.fn(async () => ({ stdout: "not json" })),
     });
     await expect(garbled.read({ identifier: "x" })).rejects.toThrow("basic-memory read returned non-JSON output");
+  });
+
+  it("lists notes, dropping folders and mapping pagination fields", async () => {
+    const execFileAsync = vi.fn(async () => ({
+      stdout: JSON.stringify({
+        nodes: [
+          { type: "directory", name: "drafts" },
+          {
+            type: "file",
+            title: "Headless dispatch",
+            permalink: "main/pearl/headless-dispatch",
+            updated_at: "2026-11-10T23:24:43-07:00",
+          },
+        ],
+        page: 1,
+        page_size: 20,
+        total: 1,
+        has_more: false,
+      }),
+    }));
+    const memory = createMemory({ bin: "/bin/bm", root: root(), env: {}, execFileAsync });
+
+    expect(await memory.list({ page: 1, limit: 20 })).toEqual({
+      notes: [
+        {
+          title: "Headless dispatch",
+          permalink: "main/pearl/headless-dispatch",
+          updatedAt: "2026-11-10T23:24:43-07:00",
+        },
+      ],
+      page: 1,
+      limit: 20,
+      total: 1,
+      hasMore: false,
+    });
+    expect(execFileAsync.mock.calls[0][1]).toEqual(listArgs({ page: 1, limit: 20 }));
+  });
+
+  it("updates by permalink: reads the title, then overwrites", async () => {
+    const execFileAsync = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ title: "Headless", permalink: "main/pearl/headless", content: "old" }),
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({ action: "updated", title: "Headless", permalink: "main/pearl/headless" }),
+      });
+    const memory = createMemory({ bin: "/bin/bm", root: root(), env: {}, execFileAsync });
+
+    const result = await memory.update({ identifier: "main/pearl/headless", content: "new" });
+
+    expect(result).toEqual({ action: "updated", title: "Headless", permalink: "main/pearl/headless" });
+    expect(execFileAsync.mock.calls[0][1]).toEqual(readArgs({ identifier: "main/pearl/headless" }));
+    expect(execFileAsync.mock.calls[1][1]).toEqual(writeArgs({ title: "Headless", content: "new", overwrite: true }));
+  });
+
+  it("raises MemoryNotFoundError updating an unknown permalink", async () => {
+    const stderr = 'Error: {"error": "NOT_FOUND", "message": "No note at \'pearl/Ghost.md\'."}\n';
+    const memory = createMemory({
+      bin: "/bin/bm",
+      root: root(),
+      env: {},
+      execFileAsync: vi.fn().mockRejectedValue(Object.assign(new Error("exit 1"), { stderr })),
+    });
+
+    await expect(memory.update({ identifier: "ghost", content: "x" })).rejects.toBeInstanceOf(MemoryNotFoundError);
+  });
+
+  it("deletes by permalink", async () => {
+    const execFileAsync = vi.fn(async () => ({
+      stdout: JSON.stringify({ action: "deleted", title: "Headless", file_path: "pearl/Headless.md" }),
+    }));
+    const memory = createMemory({ bin: "/bin/bm", root: root(), env: {}, execFileAsync });
+
+    expect(await memory.remove({ identifier: "main/pearl/headless" })).toEqual({
+      action: "deleted",
+      title: "Headless",
+      filePath: "pearl/Headless.md",
+    });
+    expect(execFileAsync.mock.calls[0][1]).toEqual(deleteArgs({ identifier: "main/pearl/headless" }));
+  });
+
+  it("raises MemoryNotFoundError deleting an unknown permalink", async () => {
+    const stderr = 'Error: {"error": "NOT_FOUND", "message": "No note at \'pearl/Ghost.md\'."}\n';
+    const memory = createMemory({
+      bin: "/bin/bm",
+      root: root(),
+      env: {},
+      execFileAsync: vi.fn().mockRejectedValue(Object.assign(new Error("exit 1"), { stderr })),
+    });
+
+    await expect(memory.remove({ identifier: "ghost" })).rejects.toBeInstanceOf(MemoryNotFoundError);
+  });
+
+  it("runs deletes and updates through the same serialized queue as writes", async () => {
+    let running = 0;
+    let maxRunning = 0;
+    const execFileAsync = vi.fn(async (bin, args) => {
+      running += 1;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      if (args[1] === "read") return { stdout: JSON.stringify({ title: "a", permalink: "p" }) };
+      return { stdout: JSON.stringify({ action: "created" }) };
+    });
+    const memory = createMemory({ bin: "/bin/bm", root: root(), env: {}, execFileAsync });
+
+    await Promise.all([
+      memory.write({ title: "a", content: "x" }),
+      memory.remove({ identifier: "b" }),
+      memory.update({ identifier: "c", content: "x" }),
+    ]);
+
+    expect(maxRunning).toBe(1);
+  });
+
+  it("keeps the mutation queue running after a failed delete", async () => {
+    const execFileAsync = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("exit 1"), { stderr: "Error: boom\n" }))
+      .mockResolvedValueOnce({ stdout: JSON.stringify({ action: "created" }) });
+    const memory = createMemory({ bin: "/bin/bm", root: root(), env: {}, execFileAsync });
+
+    await expect(memory.remove({ identifier: "a" })).rejects.toThrow(MemoryError);
+    await expect(memory.write({ title: "b", content: "x" })).resolves.toMatchObject({ action: "created" });
   });
 });
