@@ -98,8 +98,10 @@ Pearl via `SendMessage`.
 
 Every dispatched agent gets a live canvas at
 `~/.commandcenter/brain/<jobId>/canvas.md`, which it can rewrite as it
-works — the dashboard renders it on its own page (markdown plus Mermaid),
-served from `GET /api/jobs/:id/brain`. The agent decides whether to use it,
+works — the dashboard renders it on its own page (markdown plus Mermaid,
+with raw HTML escaped), served from `GET /api/jobs/:id/brain`. A non-empty
+`canvas.html` beside it takes precedence and is shown as a full page in a
+sandboxed iframe (no same-origin, no network). The agent decides whether to use it,
 not a human at dispatch time: a session card only gets a link to it once
 the canvas actually has content, so a session that was never asked to show
 its thinking — the common case — doesn't surface one.

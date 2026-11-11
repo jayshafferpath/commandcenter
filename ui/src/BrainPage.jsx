@@ -1,10 +1,10 @@
 // A session's Brain View as its own page (#/brain/<jobId>), opened in a
 // new tab from a session card so the board stays put. A presentation
-// surface for the agent: it polls canvas.md and renders whatever the
-// agent last wrote there.
+// surface for the agent: it polls the canvas and renders whatever the
+// agent last wrote there — Markdown inline, a full HTML page in a sandbox.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { marked } from "marked";
+import { escapeHtml, renderMarkdownCanvas, withCanvasCsp } from "./brainCanvas.js";
 import { fetchPanel } from "./fetchPanel.js";
 
 const POLL_INTERVAL_MS = 4000;
@@ -23,31 +23,12 @@ function loadMermaid() {
   return mermaidModulePromise;
 }
 
-function escapeHtml(text) {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-const MERMAID_FENCE = /```mermaid\n([\s\S]*?)```/g;
-
-// Mermaid fences get swapped for an empty placeholder div before the rest
-// goes through marked — mermaid.render() needs a real DOM node to target,
-// which only exists after this HTML is actually mounted, so this just
-// reserves the spot. The placeholder is our own literal div, not agent
-// input, so letting marked pass raw HTML blocks through untouched is safe
-// here even though the agent's own canvas is never otherwise treated as
-// trusted HTML.
-function renderCanvas(markdown) {
-  const mermaidBlocks = [];
-  const withPlaceholders = (markdown || "").replace(MERMAID_FENCE, (_match, code) => {
-    const id = `brain-mermaid-${mermaidBlocks.length}`;
-    mermaidBlocks.push({ id, code });
-    return `\n\n<div class="brain-mermaid" id="${id}"></div>\n\n`;
-  });
-  return { html: marked.parse(withPlaceholders), mermaidBlocks };
-}
+// No allow-same-origin: that, together with allow-scripts, would let the
+// page script its way out of the sandbox and into the dashboard's DOM,
+// cookies, and storage. With an opaque origin, scripts only ever reach the
+// page itself. No allow-top-navigation or allow-popups, so it can't take
+// over the tab either.
+const HTML_CANVAS_SANDBOX = "allow-scripts";
 
 export function BrainPage({ jobId }) {
   const [title, setTitle] = useState(null);
@@ -81,7 +62,12 @@ export function BrainPage({ jobId }) {
   }, [title]);
 
   const content = live?.content ?? "";
-  const { html, mermaidBlocks } = useMemo(() => renderCanvas(content), [content]);
+  const isHtmlCanvas = live?.format === "html";
+  const srcDoc = useMemo(() => (isHtmlCanvas ? withCanvasCsp(content) : null), [isHtmlCanvas, content]);
+  const { html, mermaidBlocks } = useMemo(
+    () => (isHtmlCanvas ? { html: "", mermaidBlocks: [] } : renderMarkdownCanvas(content)),
+    [isHtmlCanvas, content],
+  );
   // React resets innerHTML whenever this object's identity changes, not just its
   // string — a fresh object on every poll would wipe the SVGs mermaid drew into
   // the placeholders, with nothing re-running to draw them again.
@@ -128,7 +114,16 @@ export function BrainPage({ jobId }) {
 
         {error && <div className="brain-panel-error">{error}</div>}
 
-        <div className="brain-panel-body" ref={bodyRef} dangerouslySetInnerHTML={markup} />
+        {isHtmlCanvas ? (
+          <iframe
+            className="brain-panel-frame"
+            title={title || "Brain view"}
+            sandbox={HTML_CANVAS_SANDBOX}
+            srcDoc={srcDoc}
+          />
+        ) : (
+          <div className="brain-panel-body" ref={bodyRef} dangerouslySetInnerHTML={markup} />
+        )}
       </div>
     </div>
   );
