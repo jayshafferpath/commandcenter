@@ -1,17 +1,25 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __test__, readSoul, refreshPearl, writeSoul } from "../api/pearl.js";
+import { findMemoryBin } from "../api/lib/pearl-memory.js";
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, execFileSync: vi.fn() };
 });
 vi.mock("../api/run-command.js", () => ({ openSessionInIterm: vi.fn(() => ({ ok: true })) }));
+// Otherwise these tests would depend on whether this machine has basic-memory installed.
+vi.mock("../api/lib/pearl-memory.js", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, findMemoryBin: vi.fn(() => null) };
+});
 
 const { SESSION, briefing } = __test__;
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("SESSION", () => {
   it("is a fixed, singleton session name derived from PEARL_NAME", () => {
@@ -22,7 +30,7 @@ describe("SESSION", () => {
 describe("briefing", () => {
   const text = briefing({
     apiBase: "http://localhost:3789",
-    repoRoot: "/Users/jay/dev/commandcenter",
+    repoRoot: "/Users/me/dev/commandcenter",
   });
 
   it("mentions her name and role", () => {
@@ -34,13 +42,47 @@ describe("briefing", () => {
     expect(text).toContain("http://localhost:3789");
   });
 
-  it("includes the repo root for direct api/lib/jira.js access", () => {
-    expect(text).toContain("/Users/jay/dev/commandcenter");
-    expect(text).toContain("api/lib/jira.js");
+  it("includes the repo root, which /cc-tickets uses for direct Jira edits", () => {
+    expect(text).toContain("/Users/me/dev/commandcenter");
+  });
+
+  it("points at a skill for each capability instead of listing endpoints", () => {
+    for (const skill of ["/cc-dispatch", "/cc-tickets", "/cc-todos", "/cc-prs"]) {
+      expect(text).toContain(skill);
+    }
+    expect(text).not.toContain("POST /api/dispatch");
+  });
+
+  it("keeps the PR-posting rule even if /cc-prs never loads", () => {
+    expect(text).toContain("Only post a PR to Slack when the user asks for that specific PR");
   });
 
   it("is a single line — never typed into a TUI, but still safe either way", () => {
     expect(text).not.toContain("\n");
+  });
+
+  it("leaves memory out unless it's installed", () => {
+    expect(text).not.toContain("/cc-memory");
+    expect(text).not.toContain("PHI");
+  });
+
+  it("points at /cc-memory, and keeps the never-save-PHI rule, when it's enabled", () => {
+    const withMemory = briefing({
+      apiBase: "http://localhost:3789",
+      repoRoot: "/tmp",
+      memoryEnabled: true,
+    });
+    expect(withMemory).toContain("/cc-memory");
+    expect(withMemory).toContain("PHI");
+    expect(withMemory).not.toContain("\n");
+  });
+
+  it("only points at skills that exist in commands/", () => {
+    const withMemory = briefing({ apiBase: "http://x", repoRoot: "/tmp", memoryEnabled: true });
+    const referenced = [...withMemory.matchAll(/\/(cc-[a-z-]+)/g)].map(([, name]) => name);
+    const shipped = readdirSync(join(REPO_ROOT, "commands")).map((file) => file.replace(/\.md$/, ""));
+    expect(referenced.length).toBeGreaterThan(0);
+    for (const name of referenced) expect(shipped).toContain(name);
   });
 
   it("folds in SOUL.md's content when present, ahead of the technical briefing", () => {
@@ -50,6 +92,19 @@ describe("briefing", () => {
     expect(withSoul).toContain("Be terse.");
     expect(withSoul.indexOf("Be terse.")).toBeLessThan(withSoul.indexOf("REST API"));
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("SOUL.example.md", () => {
+  const template = readFileSync(join(REPO_ROOT, "SOUL.example.md"), "utf-8");
+
+  it("ships as the neutral default install.sh copies to SOUL.md", () => {
+    expect(template).toContain("## Your role: dispatch and information only");
+  });
+
+  it("names no particular user, so any install can use it as-is", () => {
+    expect(template).toContain("the user");
+    expect(template).not.toMatch(/\bJay\b|\bBoss\b/);
   });
 });
 
@@ -158,6 +213,29 @@ describe("refreshPearl", () => {
     const parsed = JSON.parse(settingsJson);
     expect(parsed.hooks.Stop[0].hooks[0].command).toContain("pearl-speak.js");
     expect(parsed.hooks.Stop[0].hooks[0].async).toBe(true);
+  });
+
+  it("never passes an MCP config — memory goes through the dashboard API", () => {
+    findMemoryBin.mockReturnValueOnce("/Users/me/.local/bin/basic-memory");
+
+    refreshPearl({ cwd: "/tmp", apiBase: "http://localhost:3789", repoRoot: "/tmp" });
+
+    const newSessionArgs = execFileSync.mock.calls.find(
+      ([cmd, args]) => cmd === "tmux" && args[0] === "new-session",
+    )[1];
+
+    expect(newSessionArgs).not.toContain("--mcp-config");
+    expect(newSessionArgs.some((arg) => arg.includes("/cc-memory"))).toBe(true);
+  });
+
+  it("doesn't brief her on memory when basic-memory isn't installed", () => {
+    refreshPearl({ cwd: "/tmp", apiBase: "http://localhost:3789", repoRoot: "/tmp" });
+
+    const newSessionArgs = execFileSync.mock.calls.find(
+      ([cmd, args]) => cmd === "tmux" && args[0] === "new-session",
+    )[1];
+
+    expect(newSessionArgs.some((arg) => arg.includes("/cc-memory"))).toBe(false);
   });
 
   it("surfaces a tmux kill failure instead of spawning over a session still running", () => {

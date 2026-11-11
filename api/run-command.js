@@ -23,7 +23,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hasBrainDir } from "./brain.js";
+import { hasBrainContent } from "./brain.js";
 
 const MAX_LOG_CHARS = 100_000;
 const SESSION_PREFIX = "ccenter-";
@@ -235,12 +235,12 @@ setInterval(pollRunningJobs, POLL_INTERVAL_MS);
 // target the wrong repo.
 //
 // `id` is optional — the caller passes one in when it needs the job's id
-// before the job exists (brain: true needs the id to build the brain dir
-// path that goes into both composedPrompt and extraArgs before this is
-// called). Defaults to a fresh uuid otherwise.
+// before the job exists (the brain dir path goes into both composedPrompt
+// and extraArgs before this is called; every /api/dispatch call does this
+// now). Defaults to a fresh uuid otherwise.
 //
 // `extraArgs` is a pre-quoted shell string fragment appended to the `claude`
-// invocation (currently just `--add-dir` for brain: true).
+// invocation (currently just the brain dir's `--add-dir`).
 export function startCommandJob({
   id = randomUUID(),
   ticketKey,
@@ -299,11 +299,13 @@ export function startCommandJob({
 // Serializable view of a job. The log is only included on request so the job
 // list stays small. hasBrain is checked on disk rather than tracked on the
 // job object — it survives an API restart (syncJobsFromTmux adopts a job
-// with no meta file) the same way the brain dir itself does.
+// with no meta file) the same way the brain dir itself does. Every job has a
+// brain dir now (see server.js /api/dispatch), so this reflects whether the
+// agent actually wrote to it, not whether one exists.
 export function serializeJob(job, { includeLog = false } = {}) {
   if (!job) return null;
   const { log, ...rest } = job;
-  const withBrain = { ...rest, hasBrain: hasBrainDir(job.id) };
+  const withBrain = { ...rest, hasBrain: hasBrainContent(job.id) };
   return includeLog ? { ...withBrain, log } : withBrain;
 }
 

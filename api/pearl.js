@@ -15,6 +15,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { openSessionInIterm } from "./run-command.js";
 import { PEARL_NAME, SESSION } from "./lib/pearl-session.js";
+import { findMemoryBin } from "./lib/pearl-memory.js";
 
 export { PEARL_NAME, SESSION };
 
@@ -24,7 +25,7 @@ export function soulPath(repoRoot) {
   return resolve(repoRoot, SOUL_FILENAME);
 }
 
-// Who Pearl is and how Jay wants her to work — editable from the dashboard's
+// Who Pearl is and how the user wants her to work — editable from the dashboard's
 // Pearl tab, read fresh on every spin-up, kept separate from the mechanical
 // API/repo briefing below so personality/preferences don't require touching
 // this file to change.
@@ -47,16 +48,31 @@ function sessionExists() {
   }
 }
 
-function briefing({ apiBase, repoRoot }) {
+// How to use each capability lives in the /cc-* skills (commands/), loaded
+// on demand. The briefing keeps only what must hold even if a skill never
+// loads: who she is, where things are, which skill covers what, and the
+// rules whose violation reaches other people or stored data.
+function briefing({ apiBase, repoRoot, memoryEnabled = false }) {
+  const skills = [
+    "/cc-dispatch (start, track, and close agent sessions)",
+    "/cc-tickets (read and change the user's Jira tickets)",
+    "/cc-todos (their personal todos)",
+    "/cc-prs (their open PRs, and posting one to Slack)",
+    memoryEnabled ? "/cc-memory (your persistent memory)" : null,
+  ].filter(Boolean);
+
   const technical = [
     `You are ${PEARL_NAME}, the supervisor agent for the Command Center dashboard.`,
-    `Command Center's REST API is at ${apiBase}.`,
-    "Key endpoints: GET /api/tickets (tickets, with each ticket's current classification), GET /api/tickets/:key (one ticket's full detail, including description), GET /api/todos, POST /api/todos ({summary, description, dueDate}), POST /api/todos/:key/complete, GET /api/jobs and GET /api/jobs/:id (agent sessions), POST /api/dispatch ({prompt, context:{type:'ticket'|'none', key}, mode:'headless'|'interactive', brain}) to start a new agent — mode defaults to headless, and a ticket that already has a running job returns 409 with that jobId, GET /api/prs (open PRs, each with isAnnounced), POST /api/prs/announce ({url}) to post one PR to Jay's Slack channel.",
-    "Pass brain: true on /api/dispatch when Jay asks you to use the brain view, show your thinking, or sketch something out — it gives the dispatched agent a live canvas (GET /api/jobs/:id/brain) it rewrites as it works, which the dashboard renders on its own page. Leave it off otherwise; it's opt-in so idle sessions don't fill it with narration nobody asked for.",
-    "Only post a PR to Slack when Jay asks for that specific PR — never on your own, never in bulk. The endpoint won't post the same PR twice (it returns alreadyPosted), so a repeat ask is safe.",
-    `You also have this repo checked out at ${repoRoot}, with api/lib/jira.js exporting searchIssues/getIssue/editIssue/addLabel/removeLabel/transitionForEvent/createIssue/getCurrentUser — use those (via a short node -e snippet) for anything the REST API doesn't cover: editing a ticket's summary, labels, status, or due date directly.`,
-    "Dispatched agents message you directly via the SendMessage tool when they finish or get stuck — expect these without polling /api/jobs yourself.",
-  ].join(" ");
+    `Command Center's REST API is at ${apiBase}, and its repo is checked out at ${repoRoot}.`,
+    `Before using a capability, load its skill: ${skills.join(", ")}.`,
+    "Dispatched agents message you via SendMessage when they finish or get stuck, so don't poll for them.",
+    "Only post a PR to Slack when the user asks for that specific PR: never on your own, never in bulk.",
+    memoryEnabled
+      ? "Search your memory before answering anything that might depend on earlier context, and never save credentials, tokens, or any patient or member information (PHI) to it."
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const soul = readSoul(repoRoot).trim();
   return soul ? `${soul}\n\n---\n\n${technical}` : technical;
@@ -98,7 +114,7 @@ function ensureSession({ cwd, apiBase, repoRoot }) {
     "-c",
     cwd,
     "claude",
-    briefing({ apiBase, repoRoot }),
+    briefing({ apiBase, repoRoot, memoryEnabled: Boolean(findMemoryBin()) }),
     // Pearl is pinned to Opus, not /automodel — she's a standing supervisor,
     // not a scoped one-shot task /automodel's heuristics are sized for.
     "--model",

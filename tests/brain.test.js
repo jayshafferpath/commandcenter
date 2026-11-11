@@ -13,7 +13,7 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: () => fakeHome };
 });
 
-const { brainDirFor, brainInstructions, canvasPathFor, ensureBrainDir, hasBrainDir, readBrain } =
+const { brainDirFor, brainInstructions, canvasPathFor, ensureBrainDir, hasBrainContent, readBrain } =
   await import("../api/brain.js");
 
 beforeEach(() => {
@@ -43,14 +43,20 @@ describe("ensureBrainDir", () => {
   });
 });
 
-describe("hasBrainDir", () => {
+describe("hasBrainContent", () => {
   it("is false until ensureBrainDir has run", () => {
-    expect(hasBrainDir("job-1")).toBe(false);
+    expect(hasBrainContent("job-1")).toBe(false);
   });
 
-  it("is true once a canvas exists", () => {
+  it("is false for an empty canvas — every job gets one, most never use it", () => {
     ensureBrainDir("job-1");
-    expect(hasBrainDir("job-1")).toBe(true);
+    expect(hasBrainContent("job-1")).toBe(false);
+  });
+
+  it("is true once the agent actually writes something", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
+    expect(hasBrainContent("job-1")).toBe(true);
   });
 });
 
@@ -89,19 +95,13 @@ describe("brainDirFor / canvasPathFor", () => {
 });
 
 describe("brainInstructions", () => {
-  it("includes the canvas path and the rewrite-whole-file rule", () => {
-    const text = brainInstructions("/tmp/foo/canvas.md");
-    expect(text).toContain("/tmp/foo/canvas.md");
-    expect(text).toContain("Rewrite the whole file");
+  it("names this job's canvas path", () => {
+    expect(brainInstructions("/tmp/foo/canvas.md")).toContain("/tmp/foo/canvas.md");
   });
 
-  it("tells the agent not to use it as a progress log", () => {
-    expect(brainInstructions("/x").toLowerCase()).toContain("not a progress log");
-  });
-
-  it("documents the markdown + mermaid format with no raw HTML", () => {
+  it("marks the canvas optional and points at the skill for how to use it", () => {
     const text = brainInstructions("/x");
-    expect(text).toContain("```mermaid");
-    expect(text).toContain("No raw");
+    expect(text).toContain("Optional");
+    expect(text).toContain("/cc-brain-view");
   });
 });

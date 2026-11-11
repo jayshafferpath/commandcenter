@@ -29,6 +29,7 @@ import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pear
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
+import { createMemory, findMemoryBin, MemoryError, MemoryExistsError } from "./lib/pearl-memory.js";
 
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
@@ -182,7 +183,7 @@ app.get("/api/jobs/:id", async (request, reply) => {
 
 // Brain View's current canvas — polled by the dashboard while its page is
 // open. 404s the same way a missing job does, both when the job itself is
-// unknown and when it never had brain: true set (no brain dir on disk).
+// unknown and when the job predates every dispatch getting a brain dir.
 app.get("/api/jobs/:id/brain", async (request, reply) => {
   const job = getJob(request.params.id);
   if (!job) {
@@ -349,10 +350,103 @@ app.post("/api/todos/:key/complete", async (request, reply) => {
   }
 });
 
+// Pearl's memory (see api/lib/pearl-memory.js). The binary is looked up per
+// request so installing it doesn't need an API restart; the instance is
+// cached per binary so every write shares one queue.
+const MEMORY_LIMITS = { query: 500, title: 120, content: 20_000, identifier: 300, results: 25 };
+let memoryInstance = null;
+
+function getMemory() {
+  const bin = findMemoryBin();
+  if (!bin) return null;
+  if (memoryInstance?.bin !== bin) memoryInstance = { bin, memory: createMemory({ bin }) };
+  return memoryInstance.memory;
+}
+
+function memoryUnavailable(reply) {
+  reply.code(503);
+  return { ok: false, error: "Pearl's memory isn't installed. Run ./install.sh --memory." };
+}
+
+function memoryFailure(request, reply, err) {
+  if (err instanceof MemoryExistsError) {
+    reply.code(409);
+    return { ok: false, error: err.message };
+  }
+  request.log.error(err, "Pearl memory call failed");
+  reply.code(err instanceof MemoryError ? 502 : 500);
+  return { ok: false, error: err.message };
+}
+
+function isBoundedString(value, max) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= max;
+}
+
+app.get("/api/memory/search", async (request, reply) => {
+  const { q, limit = "5" } = request.query || {};
+  if (!isBoundedString(q, MEMORY_LIMITS.query)) {
+    reply.code(400);
+    return { ok: false, error: `q is required (at most ${MEMORY_LIMITS.query} characters)` };
+  }
+  const count = Number.parseInt(limit, 10);
+  if (!Number.isInteger(count) || count < 1 || count > MEMORY_LIMITS.results) {
+    reply.code(400);
+    return { ok: false, error: `limit must be between 1 and ${MEMORY_LIMITS.results}` };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, results: await memory.search({ query: q, limit: count }) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
+app.get("/api/memory/note", async (request, reply) => {
+  const { id } = request.query || {};
+  if (!isBoundedString(id, MEMORY_LIMITS.identifier)) {
+    reply.code(400);
+    return { ok: false, error: "id is required — a permalink from search results" };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, note: await memory.read({ identifier: id }) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
+app.post("/api/memory", async (request, reply) => {
+  const { title, content, overwrite = false } = request.body || {};
+  if (!isBoundedString(title, MEMORY_LIMITS.title)) {
+    reply.code(400);
+    return { ok: false, error: `title is required (at most ${MEMORY_LIMITS.title} characters)` };
+  }
+  if (!isBoundedString(content, MEMORY_LIMITS.content)) {
+    reply.code(400);
+    return { ok: false, error: `content is required (at most ${MEMORY_LIMITS.content} characters)` };
+  }
+  if (typeof overwrite !== "boolean") {
+    reply.code(400);
+    return { ok: false, error: "overwrite must be true or false" };
+  }
+
+  const memory = getMemory();
+  if (!memory) return memoryUnavailable(reply);
+  try {
+    return { ok: true, ...(await memory.write({ title, content, overwrite })) };
+  } catch (err) {
+    return memoryFailure(request, reply, err);
+  }
+});
+
 // Dispatch a free-form agent, scoped to whatever is focused (a ticket, or
 // nothing). Gated the same way as the rest of the dashboard's write actions.
 app.post("/api/dispatch", async (request, reply) => {
-  const { prompt, context, mode, brain } = request.body || {};
+  const { prompt, context, mode } = request.body || {};
   if (!prompt) {
     reply.code(400);
     return { ok: false, error: "prompt is required" };
@@ -439,7 +533,9 @@ app.post("/api/dispatch", async (request, reply) => {
   // /api/jobs — she's named (see pearl.js) so SendMessage can reach her
   // directly. Only covers a job that can still run its own final turn; one
   // wedged on a permission dialog can't execute this instruction either.
-  composedPrompt = `${composedPrompt}\n\n---\n\nWhen you finish — done, failed, or stopping because you're blocked — send ${PEARL_NAME} a brief status via the SendMessage tool: one or two sentences on what happened and whether anything needs human attention. Don't wait for a reply.`;
+  // The instruction itself stays inline so it holds even if /cc-report never
+  // loads; the skill only covers how to word the report.
+  composedPrompt = `${composedPrompt}\n\n---\n\nWhen you finish — done, failed, or stopping because you're blocked — send ${PEARL_NAME} a brief status via the SendMessage tool: one or two sentences on what happened and whether anything needs human attention. Don't wait for a reply. /cc-report covers what to include.`;
 
   if (!cwd) {
     reply.code(400);
@@ -458,22 +554,20 @@ app.post("/api/dispatch", async (request, reply) => {
     }
   }
 
-  // The id is generated here, ahead of startCommandJob, only when brain is
-  // on — the brain dir's path has to be baked into both composedPrompt (so
-  // the agent knows where to write) and the claude invocation's --add-dir
-  // (so it's allowed to) before the job/tmux session exists. Everything
-  // else still lets startCommandJob mint its own id.
-  let jobId;
-  let extraArgs = "";
-  if (brain) {
-    jobId = randomUUID();
-    const brainDir = ensureBrainDir(jobId);
-    composedPrompt = `${composedPrompt}\n\n${brainInstructions(canvasPathFor(jobId))}`;
-    extraArgs = `--add-dir '${brainDir}'`;
-  }
+  // Every dispatched agent gets a brain dir and permission to write to it —
+  // the agent decides for itself whether to actually use it (see
+  // brainInstructions), not a human at dispatch time. The id has to be
+  // generated here, ahead of startCommandJob, because the brain dir's path
+  // has to be baked into both composedPrompt (so the agent knows where to
+  // write) and the claude invocation's --add-dir (so it's allowed to)
+  // before the job/tmux session exists.
+  const jobId = randomUUID();
+  const brainDir = ensureBrainDir(jobId);
+  composedPrompt = `${composedPrompt}\n\n${brainInstructions(canvasPathFor(jobId))}`;
+  const extraArgs = `--add-dir '${brainDir}'`;
 
   const job = startCommandJob({
-    ...(jobId ? { id: jobId } : {}),
+    id: jobId,
     ticketKey,
     title,
     prompt: composedPrompt,
@@ -513,7 +607,7 @@ app.post("/api/pearl/refresh", async (request, reply) => {
   return result;
 });
 
-// SOUL.md: who Pearl is and how Jay wants her to work, read fresh on every
+// SOUL.md: who Pearl is and how the user wants her to work, read fresh on every
 // spin-up. Editable here instead of only by hand, so it stays a thing you'd
 // actually keep up to date.
 app.get("/api/pearl/soul", async () => ({

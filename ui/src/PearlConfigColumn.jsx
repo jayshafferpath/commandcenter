@@ -1,4 +1,4 @@
-// Editor for SOUL.md — who Pearl is and how Jay wants her to work. Read
+// Editor for SOUL.md — who Pearl is and how the user wants her to work. Read
 // fresh by pearl.js on every spin-up, so saving here changes her next
 // session, not the one already running (she's a persistent tmux session;
 // nothing re-reads this mid-conversation).

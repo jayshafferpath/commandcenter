@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The rest is opt-in per feature — pick what you actually use.
 WITH_MCP=false
 WITH_PTT=false
+WITH_MEMORY=false
 
 usage() {
   echo "Usage: ./install.sh [options]"
@@ -16,6 +17,7 @@ usage() {
   echo "Optional (off by default):"
   echo "  --mcp       Register the Atlassian MCP server (needed for Pearl's Jira work)"
   echo "  --ptt       Set up push-to-talk voice input for Pearl (Hammerspoon + Superwhisper glue)"
+  echo "  --memory    Install Basic Memory for Pearl's persistent, local-only memory (~0.5 GB)"
   echo "  --all       Enable all of the above"
   echo "  -h, --help  Show this help"
 }
@@ -24,7 +26,8 @@ for arg in "$@"; do
   case "$arg" in
     --mcp) WITH_MCP=true ;;
     --ptt) WITH_PTT=true ;;
-    --all) WITH_MCP=true; WITH_PTT=true ;;
+    --memory) WITH_MEMORY=true ;;
+    --all) WITH_MCP=true; WITH_PTT=true; WITH_MEMORY=true ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "Unknown option: $arg"
@@ -48,6 +51,15 @@ if [ ! -f "$SCRIPT_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
   echo ""
   echo "  Created $SCRIPT_DIR/.env from template (DEV_ROOT defaulted to $DEV_ROOT_DEFAULT)"
   echo "  Fill in JIRA_EMAIL, JIRA_API_TOKEN, JIRA_DOMAIN"
+fi
+
+# SOUL.md is each user's own copy of Pearl's personality, gitignored like
+# .env. Seeded from the neutral template once, never overwritten, so edits
+# made from the dashboard's Pearl tab survive a re-run.
+if [ ! -f "$SCRIPT_DIR/SOUL.md" ] && [ -f "$SCRIPT_DIR/SOUL.example.md" ]; then
+  cp "$SCRIPT_DIR/SOUL.example.md" "$SCRIPT_DIR/SOUL.md"
+  echo ""
+  echo "  Created $SCRIPT_DIR/SOUL.md from template — make Pearl yours from the dashboard's Pearl tab"
 fi
 
 echo ""
@@ -234,6 +246,60 @@ EOF
 else
   echo ""
   echo "Skipping push-to-talk setup (pass --ptt or --all to enable)."
+fi
+
+if [ "$WITH_MEMORY" = true ]; then
+  echo ""
+  echo "Setting up Pearl's memory (Basic Memory, local-only)..."
+
+  # Probed with `--version`, not `command -v`: an asdf shim answers
+  # `command -v uv` even when no installed Python provides uv, then fails on
+  # every call. Homebrew's uv is called by full path because asdf's shims
+  # sit ahead of Homebrew on PATH, so a plain `uv` would still hit the broken
+  # shim right after `brew install uv`.
+  UV=""
+  if uv --version >/dev/null 2>&1; then
+    UV="uv"
+  elif command -v brew >/dev/null 2>&1; then
+    BREW_UV="$(brew --prefix)/bin/uv"
+    if ! "$BREW_UV" --version >/dev/null 2>&1; then
+      echo "  uv not found — installing it with Homebrew..."
+      brew install uv || true
+    fi
+    if "$BREW_UV" --version >/dev/null 2>&1; then
+      UV="$BREW_UV"
+    fi
+  fi
+
+  if [ -z "$UV" ]; then
+    echo "  Warning: uv isn't available and couldn't be installed — skipping memory setup."
+    echo "    Install uv (https://docs.astral.sh/uv/), then re-run with --memory"
+  else
+    # --managed-python: uv's own CPython ships SQLite extension loading.
+    # Many system/asdf builds don't, and without it sqlite-vec can't load and
+    # search silently drops to keyword-only.
+    if "$UV" tool list 2>/dev/null | grep -q "^basic-memory "; then
+      echo "  basic-memory already installed"
+    elif "$UV" tool install --managed-python basic-memory; then
+      echo "  Installed basic-memory"
+    else
+      echo "  Warning: failed to install basic-memory."
+      echo "    Run manually: $UV tool install --managed-python basic-memory"
+    fi
+
+    UV_BIN_DIR="$("$UV" tool dir --bin 2>/dev/null || true)"
+    if [ "$UV_BIN_DIR" != "$HOME/.local/bin" ] && [ -n "$UV_BIN_DIR" ]; then
+      echo "  Note: uv installs tools to $UV_BIN_DIR, not ~/.local/bin."
+      echo "    Set PEARL_MEMORY_BIN=$UV_BIN_DIR/basic-memory in $SCRIPT_DIR/.env"
+    fi
+
+    mkdir -p "$HOME/.commandcenter/memory"
+    echo "  Memory lives in ~/.commandcenter/memory (Markdown notes under notes/)"
+    echo "  Restart Pearl (↻ in the dashboard) to give her the memory tools"
+  fi
+else
+  echo ""
+  echo "Skipping Pearl's memory setup (pass --memory or --all to enable)."
 fi
 
 echo ""

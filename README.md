@@ -10,9 +10,10 @@ away in a real terminal.
 
 ```bash
 ./install.sh            # core setup only
-./install.sh --all      # + Atlassian MCP registration + push-to-talk setup
-./install.sh --mcp      # + Atlassian MCP registration only
-./install.sh --ptt      # + push-to-talk setup only
+./install.sh --all      # + everything below
+./install.sh --mcp      # + Atlassian MCP registration
+./install.sh --ptt      # + push-to-talk setup
+./install.sh --memory   # + Pearl's persistent memory (Basic Memory, ~0.5 GB)
 ```
 
 Core (always runs): installs dependencies, creates `.env` from the
@@ -27,6 +28,9 @@ Optional, off by default — pick what you actually use:
   work goes through it)
 - `--ptt` sets up push-to-talk voice input for Pearl (see Pearl's voice,
   below)
+- `--memory` installs Basic Memory with `uv` for Pearl's persistent memory,
+  installing `uv` itself with Homebrew first if it isn't usable (see Pearl's
+  memory, below)
 
 `install.sh` defaults `DEV_ROOT` to commandcenter's own parent directory
 (it's always a repo under your `DEV_ROOT`) — adjust it if that's wrong.
@@ -61,7 +65,8 @@ api/
   lib/              Jira REST client, label/stack helpers, ADF→text,
                      Slack PR announce, etc.
 commands/           Claude Code commands symlinked into ~/.claude/commands
-                     by install.sh (currently /automodel)
+                     by install.sh: /automodel, plus one /cc-* skill per
+                     dashboard capability
 hammerspoon/        Push-to-talk hotkey glue for Pearl
 ui/                 React dashboard (Vite)
 tests/              Vitest suite for api/ and ui/ pure logic
@@ -91,23 +96,78 @@ Pearl via `SendMessage`.
 
 ## Brain View
 
-Pass `brain: true` on dispatch to give the agent a live canvas at
-`~/.commandcenter/brain/<jobId>/canvas.md`, which it rewrites as it works.
-The dashboard renders it on its own page (markdown plus Mermaid), served
-from `GET /api/jobs/:id/brain`. Opt-in, so sessions that weren't asked to
-show their thinking don't fill it with narration.
+Every dispatched agent gets a live canvas at
+`~/.commandcenter/brain/<jobId>/canvas.md`, which it can rewrite as it
+works — the dashboard renders it on its own page (markdown plus Mermaid),
+served from `GET /api/jobs/:id/brain`. The agent decides whether to use it,
+not a human at dispatch time: a session card only gets a link to it once
+the canvas actually has content, so a session that was never asked to show
+its thinking — the common case — doesn't surface one.
+
+## Skills
+
+How Pearl and dispatched agents use each dashboard capability lives in one
+skill per capability, in `commands/`, loaded only when needed:
+
+| Skill | Used by | Covers |
+|---|---|---|
+| `/cc-dispatch` | Pearl | Starting, tracking, and closing agent sessions |
+| `/cc-tickets` | Pearl | Reading the user's tickets; changing them through `api/lib/jira.js` |
+| `/cc-todos` | Pearl | Listing, adding, and completing todos |
+| `/cc-prs` | Pearl | Listing open PRs; posting one to Slack |
+| `/cc-memory` | Pearl | Searching and saving her memory |
+| `/cc-brain-view` | Dispatched agents | Using the Brain View canvas |
+| `/cc-report` | Dispatched agents | Reporting back to Pearl when done |
+
+Pearl's briefing and each dispatched prompt carry a pointer to the right
+skills, plus the few rules that must hold even if a skill never loads.
+Run `./install.sh` after adding a skill so it gets symlinked.
 
 ## SOUL.md
 
 Who Pearl is and how you want her to work, kept separate from the
 mechanical API briefing (`api/pearl.js`) so personality/preferences don't
-require editing code. Edit it from the dashboard's Pearl tab, or directly —
-it's read fresh every time she spins up. The ↻ button next to her name
+require editing code. Each install has its own: `install.sh` copies the
+neutral `SOUL.example.md` to `SOUL.md` the first time, and `SOUL.md` is
+gitignored, so your edits stay yours. Edit it from the dashboard's Pearl
+tab, or directly — it's read fresh every time she spins up. The ↻ button next to her name
 restarts her session so edits take effect, discarding her current
 conversation.
 
 Pearl runs pinned to Opus in `auto` permission mode, named `PEARL_NAME` so
 dispatched agents can reach her with `SendMessage`.
+
+## Pearl's memory
+
+With `./install.sh --memory`, Pearl gets persistent memory that survives
+restarts: [Basic Memory](https://github.com/basicmachines-co/basic-memory),
+which the API drives through its CLI (`api/lib/pearl-memory.js`) and exposes
+as routes she calls like the rest of the dashboard:
+
+- `GET /api/memory/search?q=<question>&limit=<1-25>` — ranked notes
+- `GET /api/memory/note?id=<permalink>` — one full note
+- `POST /api/memory` with `{ title, content, overwrite }` — save one;
+  a title that already exists returns 409 unless `overwrite` is true
+
+It isn't an MCP server because the org's managed MCP policy blocks servers
+that aren't on its allowlist. She saves deliberately — decisions, standing
+preferences, outcomes worth knowing later — and searches before answering
+anything that depends on earlier context. Saves take about 3 seconds and run
+one at a time.
+
+Everything stays on this machine. Memories are Markdown files under
+`~/.commandcenter/memory/notes/`, indexed in SQLite with sqlite-vec, and
+embedded locally with FastEmbed (`bge-small-en-v1.5`, downloaded once). The
+CLI runs with a fixed environment, not the API's own: the local embedding
+provider is pinned, `OPENAI_API_KEY` is blank, and the API's Jira
+credentials never reach it. She's told never to save credentials or PHI.
+
+To see or fix what she remembers, open the notes in any editor. If
+basic-memory isn't installed, Pearl runs without memory and her briefing
+doesn't mention it. Restart her (↻) after installing.
+
+Optional env: `PEARL_MEMORY_BIN` when `uv` installs tools somewhere other
+than `~/.local/bin`.
 
 ## Pearl's voice
 

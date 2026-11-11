@@ -15,8 +15,8 @@ const WEBHOOK_URL = "https://hooks.slack.com/triggers/T000/000/fake";
 function makePr(overrides = {}) {
   return {
     title: "Add thing",
-    url: "https://github.com/jayshafferpath/commandcenter/pull/1",
-    repo: "jayshafferpath/commandcenter",
+    url: "https://github.com/acme/widgets/pull/1",
+    repo: "acme/widgets",
     number: 1,
     ...overrides,
   };
@@ -79,7 +79,7 @@ describe("announcePr", () => {
       text: `:pr-review-request: Add thing\n${pr.url}`,
       title: "Add thing",
       url: pr.url,
-      repo: "jayshafferpath/commandcenter",
+      repo: "acme/widgets",
       number: "1",
     });
     expect(mkdirSync).toHaveBeenCalledWith(expect.stringContaining(".commandcenter"), {

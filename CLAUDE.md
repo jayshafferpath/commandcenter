@@ -19,12 +19,17 @@ See README.md for setup, architecture, and feature docs.
 - `api/pearl.js` — Pearl's tmux session and her briefing
 - `api/run-command.js` — dispatched agents as tmux-backed jobs
 - `api/brain.js` — Brain View canvas storage under `~/.commandcenter/brain/`
+- `api/lib/pearl-memory.js` — Pearl's memory: runs the Basic Memory CLI for
+  the `/api/memory` routes. It must stay local-only (fixed child env, pinned
+  embedding provider, blanked `OPENAI_API_KEY`). Not an MCP server: the
+  org's managed MCP policy blocks unapproved servers.
 - `api/pearl-speak.js` — Pearl's Stop-hook speech and push-to-talk input
 - `api/lib/` — Jira client (`jira.js`), lifecycle labels (`labels.js`,
   canonical), config/env loading, PR and Slack helpers
 - `ui/src/` — React dashboard, one component per column
 - `commands/` — Claude Code commands symlinked into `~/.claude/commands` by
-  `install.sh`; dispatch depends on `/automodel` resolving
+  `install.sh`; dispatch depends on `/automodel` resolving. The `cc-*` files
+  are one skill per dashboard capability (see Pearl, below)
 - `tests/` — Vitest, covering `api/` and the pure parts of `ui/`
 
 ## Conventions
@@ -39,15 +44,25 @@ See README.md for setup, architecture, and feature docs.
 
 ## Pearl
 
-- `SOUL.md` holds her personality and preferences; the technical briefing
-  lives in `briefing()` in `api/pearl.js`. Keep personality out of code and
-  mechanics out of SOUL.md.
+- Three places, three jobs: `SOUL.md` is her personality only; `briefing()`
+  in `api/pearl.js` says who she is, where things are, which skill covers
+  what, and the rules that must hold even if a skill never loads (never
+  post a PR unprompted, never save PHI to memory); the `commands/cc-*.md`
+  skills say how to use each capability. Keep each kind of content in its
+  place.
+- `SOUL.md` is per-user and gitignored. The shipped default is
+  `SOUL.example.md`, which `install.sh` copies on first run; personality
+  changes meant for everyone go there. Keep it free of any one person's
+  name or preferences — the project has to deploy for anyone.
 - The briefing must stay a single line (it's passed as the `claude` prompt
   argument, and `tests/pearl.test.js` asserts no newlines).
-- When you add or change an API route Pearl should use, update the
-  briefing's endpoint list in the same change.
+- When you add or change an API route, update the matching `cc-*` skill in
+  the same change. A new capability gets its own skill and a pointer in the
+  briefing (`tests/pearl.test.js` checks every pointer has a file).
 - Briefing and SOUL.md edits only reach her after a restart (↻ in the
-  dashboard, or `POST /api/pearl/refresh`).
+  dashboard, or `POST /api/pearl/refresh`). Skill edits don't need one:
+  she reads a skill when she loads it. A new skill file needs
+  `./install.sh` to symlink it.
 - Her session is pinned to Opus in `auto` permission mode and named
   `PEARL_NAME` so dispatched agents can `SendMessage` her.
 

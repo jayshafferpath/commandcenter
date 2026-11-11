@@ -1135,15 +1135,6 @@ body {
   background: var(--bg-hover);
 }
 
-.dispatch-brain-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
 .brain-page {
   display: flex;
   justify-content: center;

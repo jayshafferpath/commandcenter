@@ -1,6 +1,6 @@
 // Pearl's on-demand speech. The Stop hook (wired in only for her own
 // session — see pearl.js's --settings arg) runs this with no subcommand and
-// caches her condensed reply; it's only spoken when Jay asks via a hotkey
+// caches her condensed reply; it's only spoken when the user asks via a hotkey
 // (`say`), or when a turn was started by voice (`ask`, for a dictation tool
 // that can shell out directly with the text already known; `preflight` +
 // `voice`, the push-to-talk pair driven by Superwhisper's CLI — see
@@ -18,12 +18,12 @@ const TMUX = "/opt/homebrew/bin/tmux";
 // Superwhisper's CLI (installed separately via its install-cli.sh, not by
 // the app bundle itself) lands in ~/.local/bin, not on the minimal PATH a
 // global hotkey tool like Hammerspoon runs with — same reasoning as TMUX
-// above. Overridable in case Jay's install lands somewhere else.
+// above. Overridable in case the install lands somewhere else.
 const SUPERWHISPER_BIN =
   process.env.PEARL_SUPERWHISPER_BIN?.trim() || join(homedir(), ".local/bin/superwhisper");
 
 // Set this to a mode key (Superwhisper Settings → that mode → its key) once
-// Jay has configured one with a local voice model and no language-model
+// the user has configured one with a local voice model and no language-model
 // stage. `preflight` switches to it before every recording so Pearl's voice
 // path can't silently end up on whatever mode happens to be active
 // elsewhere — which, out of the box, uses Superwhisper's cloud model. Left
@@ -270,7 +270,7 @@ function latestTranscriptSnapshot() {
   }
 }
 
-// `rawResult`, not `llmResult` — Pearl should get what Jay actually said,
+// `rawResult`, not `llmResult` — Pearl should get what the user actually said,
 // not a mode's language-model cleanup pass (which, depending on how that
 // mode is configured, might not even be a local call).
 export function transcriptText(snapshot) {

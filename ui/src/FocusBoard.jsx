@@ -83,13 +83,13 @@ export function FocusBoard() {
   );
 
   const dispatch = useCallback(
-    async (prompt, context = { type: "none" }, mode = "headless", brain = false) => {
+    async (prompt, context = { type: "none" }, mode = "headless") => {
       setDispatchError(null);
       try {
         const res = await fetch("/api/dispatch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, context, mode, brain }),
+          body: JSON.stringify({ prompt, context, mode }),
         });
         const data = await res.json();
         if (!data.ok) {
@@ -146,7 +146,7 @@ export function FocusBoard() {
   );
 
   const requestDispatch = useCallback(
-    (prompt, brain) => requestMode({ kind: "general", prompt, brain }),
+    (prompt) => requestMode({ kind: "general", prompt }),
     [requestMode],
   );
 
@@ -156,7 +156,7 @@ export function FocusBoard() {
     const ok =
       action.kind === "ticket"
         ? await spawnAgent(action.ticket, mode)
-        : await dispatch(action.prompt, { type: "none" }, mode, action.brain);
+        : await dispatch(action.prompt, { type: "none" }, mode);
     action.resolve(ok);
   };
 

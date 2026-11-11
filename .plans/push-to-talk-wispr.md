@@ -48,7 +48,7 @@ prevent. The local audio file and sqlite history row for that recording are
 still sitting on this machine (`~/superwhisper/recordings/`, plus the
 sqlite db at `~/Library/Application Support/superwhisper/database/`); I
 couldn't delete them — no `delete` subcommand in the CLI, and direct
-file/db deletion was blocked by the permission system. Jay needs to deal
+file/db deletion was blocked by the permission system. The user needs to deal
 with that cleanup and, if it matters, Superwhisper's retention/deletion
 options for whatever was already sent to their servers.
 
@@ -70,7 +70,7 @@ hotkey — not after.
      ever starts listening, exits non-zero so the hotkey script knows not
      to call `start`. If `PEARL_SUPERWHISPER_MODE` is set, switches to that
      mode so this path can't end up on whatever mode happens to be active
-     for Jay's general dictation elsewhere. Records a snapshot of
+     for the user's general dictation elsewhere. Records a snapshot of
      Superwhisper's current latest transcript as a baseline.
    - `voice` (key-up, after Superwhisper has been told to stop): polls
      `superwhisper read --json` until it differs from the baseline (bounded
@@ -79,7 +79,7 @@ hotkey — not after.
      stale), pulls `rawResult` out of it, and sends that through the exact
      same `sendToChat` path `ask` uses — same `isAtChatPrompt` re-check
      right before injecting anything, same `speak-next` arming.
-   - Uses `rawResult`, not `llmResult`: Pearl should get what Jay actually
+   - Uses `rawResult`, not `llmResult`: Pearl should get what the user actually
      said, not a mode's language-model cleanup pass. This also sidesteps
      having to reason about whether that cleanup pass was local or cloud —
      the mode being `type: "voice"` (no language-model stage at all) is
@@ -96,7 +96,7 @@ hotkey — not after.
    if it exits 0; release calls `superwhisper stop` then `voice`.
    Reference config: `hammerspoon/pearl-ptt.lua`.
 
-## What Jay has to do manually
+## What has to be done manually
 
 1. ~~Set up a local-only mode in Superwhisper.~~ Done — `default` mode
    (key `"default"`) uses a local Parakeet voice model
@@ -121,5 +121,5 @@ hotkey — not after.
    Superwhisper's servers once.
 
 Nothing past step 0 (researching/choosing the tool) could be done without
-Jay's hands — no GUI automation, no clicking through model pickers or
+a human's hands — no GUI automation, no clicking through model pickers or
 Accessibility prompts.

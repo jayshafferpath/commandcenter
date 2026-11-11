@@ -1,9 +1,10 @@
 // Live/past agent runs, as a feed of closed cards — no expand, no inline
 // log. A session's whole reason for existing here is "jump to it or don't";
 // the log itself lives in the actual tmux pane, one click away. The one
-// opt-in exception is Brain View: a card for a session dispatched with
-// brain: true gets a link that opens its canvas page in a new tab, since
-// that's content meant to be read here, not in the pane.
+// exception is Brain View: a card gets a link that opens its canvas page in
+// a new tab once the agent has actually written something to it (every
+// session has the capability; most never use it), since that's content
+// meant to be read here, not in the pane.
 
 import { useEffect, useState } from "react";
 import { StatusIcon } from "./StatusIcon.jsx";

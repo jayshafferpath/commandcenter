@@ -10,14 +10,13 @@ import { useState } from "react";
 export function DispatchBar({ onDispatch, error }) {
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
-  const [brain, setBrain] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     if (!prompt.trim() || sending) return;
 
     setSending(true);
-    const ok = await onDispatch(prompt, brain);
+    const ok = await onDispatch(prompt);
     setSending(false);
     if (ok) setPrompt("");
   };
@@ -47,15 +46,6 @@ export function DispatchBar({ onDispatch, error }) {
           {sending ? "…" : "Dispatch"}
         </button>
       </div>
-      <label className="dispatch-brain-toggle">
-        <input
-          type="checkbox"
-          checked={brain}
-          onChange={(e) => setBrain(e.target.checked)}
-          disabled={sending}
-        />
-        Brain view — give it a live canvas to think out loud on
-      </label>
       {error && <span className="action-error">{error}</span>}
     </form>
   );

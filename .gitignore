@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+SOUL.md
 .vite/
 *.log
 hammerspoon/pearl-ptt.local.lua

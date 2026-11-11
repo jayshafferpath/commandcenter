@@ -1,5 +1,5 @@
 // Brain View storage: a per-job canvas a dispatched agent rewrites in full
-// whenever it wants to present something to Jay. Lives centrally under the
+// whenever it wants to present something to the user. Lives centrally under the
 // user's home dir rather than the job's cwd, because a dispatched agent
 // runs in whatever repo the ticket resolved to, not in this one.
 //
@@ -38,8 +38,15 @@ export function ensureBrainDir(jobId) {
   return dir;
 }
 
-export function hasBrainDir(jobId) {
-  return existsSync(canvasPathFor(jobId));
+// Every dispatched job gets a canvas (see server.js /api/dispatch) and the
+// agent decides for itself whether to use it — so "has a brain dir" would
+// always be true and the dashboard would show a link on every session
+// whether or not anything was ever written there. This checks for actual
+// content instead, which is what makes the link opt-in in practice.
+export function hasBrainContent(jobId) {
+  const canvasPath = canvasPathFor(jobId);
+  if (!existsSync(canvasPath)) return false;
+  return statSync(canvasPath).size > 0;
 }
 
 export function readBrain(jobId) {
@@ -51,24 +58,16 @@ export function readBrain(jobId) {
   };
 }
 
-// What gets appended to composedPrompt when brain: true — a separate
-// section from the Pearl status footer, not folded into it, since this one
-// is instructions for the agent's own behavior throughout the run rather
-// than a one-time final action.
+// Appended to every dispatched agent's composedPrompt. Just the path and a
+// pointer: how to use the canvas lives in the /cc-brain-view skill. The path
+// can't move there, since it's different for every job. Unconditional: the
+// agent decides whether to use it, and a dashboard link only appears once
+// the file has content (see hasBrainContent).
 export function brainInstructions(canvasPath) {
   return [
     "---",
     "",
-    "Brain View is on for this session: Jay is watching a live canvas at",
-    `${canvasPath}`,
-    "",
-    "Rewrite the whole file each time you update it — it's your current",
-    "state of thinking, not a log to append to. Use it for things you'd want",
-    "Jay to see as you work: a design you're sketching out, a diagram, notes",
-    "you're thinking through out loud. It's not a progress log — skip it if",
-    "you have nothing worth showing.",
-    "",
-    "Format: Markdown, with fenced ```mermaid blocks for diagrams. No raw",
-    "HTML.",
+    `Optional: you have a Brain View canvas at ${canvasPath} that the user can watch while you work.`,
+    "Most sessions never use it. If you want to show your thinking there, load /cc-brain-view first.",
   ].join("\n");
 }
