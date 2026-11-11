@@ -7,6 +7,13 @@
 // .plans/push-to-talk-wispr.md). `hush` cuts speech off. Dispatched jobs
 // never load this.
 
+// Hammerspoon launches this directly via hs.task with its own explicit
+// (and minimal) environment — PEARL_NAME never reaches it that way, so
+// without this SESSION below would default to "ccenter-pearl" even when
+// the live supervisor has been renamed via .env. Must run before the
+// pearl-session.js import evaluates, same ordering reason as server.js.
+import "./lib/load-env.js";
+
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -103,7 +110,9 @@ export function summarizeForSpeech(text) {
       "claude",
       [
         "-p",
-        `Summarize the core idea of this in one short spoken sentence. No preamble, no quotes, just the sentence:\n\n${text}`,
+        // "Summarize" made haiku narrate from outside ("Pearl says..."); asking
+        // for a first-person rewrite keeps the spoken line in her own voice.
+        `Rewrite this message as one short spoken sentence, in the speaker's own first-person voice, talking directly to the listener. Don't describe the message or mention who wrote it. No preamble, no quotes, just the sentence:\n\n${text}`,
         "--model",
         "haiku",
       ],
