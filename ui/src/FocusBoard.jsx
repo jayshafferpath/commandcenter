@@ -13,7 +13,8 @@
 // All three tab contents stay mounted (just hidden) so switching is instant
 // and each one's own polling isn't restarted by a tab switch.
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { latestOnly } from "./latestOnly.js";
 import { TicketColumn } from "./TicketColumn.jsx";
 import { TodoColumn } from "./TodoColumn.jsx";
 import { PrColumn } from "./PrColumn.jsx";
@@ -50,15 +51,30 @@ export function FocusBoard() {
     }
   }, []);
 
-  const fetchJobs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/jobs");
-      const data = await res.json();
-      setJobs(data.jobs || []);
-    } catch {
-      // Job history is supplementary — a failure here shouldn't blank the board.
-    }
-  }, []);
+  // Polled from here (10s) and from SessionColumn (3s while jobs are live);
+  // latestOnly keeps an older in-flight response from overwriting a newer one.
+  const fetchJobs = useMemo(
+    () =>
+      latestOnly(
+        async () => {
+          try {
+            const res = await fetch("/api/jobs", {
+              signal: AbortSignal.timeout(8000),
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            return data.jobs || [];
+          } catch {
+            // Job history is supplementary — a failure here shouldn't blank the board.
+            return null;
+          }
+        },
+        (list) => {
+          if (list) setJobs(list);
+        },
+      ),
+    [],
+  );
 
   const closeSession = useCallback(
     async (jobId) => {
@@ -167,12 +183,18 @@ export function FocusBoard() {
   };
 
   useEffect(() => {
-    fetchTickets();
-    fetchJobs();
+    const refresh = () => {
+      fetchTickets();
+      fetchJobs();
+    };
+    refresh();
 
+    // Jobs poll on the ticket cadence so sessions dispatched through the API
+    // show up without a reload; SessionColumn adds its faster loop on top once
+    // something is live.
     let interval = null;
     const start = () => {
-      if (interval === null) interval = setInterval(fetchTickets, 10000);
+      if (interval === null) interval = setInterval(refresh, 10000);
     };
     const stop = () => {
       if (interval !== null) {
@@ -185,7 +207,7 @@ export function FocusBoard() {
       if (document.hidden) {
         stop();
       } else {
-        fetchTickets();
+        refresh();
         start();
       }
     };
