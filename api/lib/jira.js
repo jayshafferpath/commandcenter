@@ -227,10 +227,25 @@ export function pickTransition(transitions, candidateNames) {
   return null;
 }
 
+// Thrown by transitionForEvent when the workflow has no transition matching
+// the requested event, so callers can tell "nothing to do" from "Jira call
+// failed" and report the available transitions instead of guessing.
+export class NoTransitionError extends Error {
+  constructor(key, event, available) {
+    super(
+      `No workflow transition for ${key} matching event "${event}". Available: ${available.join(", ") || "(none)"}`,
+    );
+    this.name = "NoTransitionError";
+    this.key = key;
+    this.event = event;
+    this.available = available;
+  }
+}
+
 // Move a ticket's workflow status for a named lifecycle event (see
-// STATUS_TRANSITIONS). Best-effort: returns the transition that was applied,
-// or null when the workflow offers no match (logged, not thrown) — callers
-// treat status as advisory and probe the PR for ground truth.
+// STATUS_TRANSITIONS). Throws NoTransitionError when the workflow offers no
+// matching transition — callers must handle that explicitly rather than
+// treating a no-op as success.
 export async function transitionForEvent(key, event) {
   const candidates = STATUS_TRANSITIONS[event];
   if (!candidates) {
@@ -239,24 +254,13 @@ export async function transitionForEvent(key, event) {
     );
   }
 
-  try {
-    const transitions = await getTransitions(key);
-    const match = pickTransition(transitions, candidates);
-    if (!match) {
-      const available = transitions.map((t) => t.name).join(", ") || "(none)";
-      console.warn(
-        `transitionForEvent: no workflow transition matching [${candidates.join(", ")}] for ${key}. Available: ${available}. Status unchanged.`,
-      );
-      return null;
-    }
-    await transitionIssue(key, match.id);
-    return match;
-  } catch (err) {
-    console.warn(
-      `transitionForEvent: status transition for ${key} failed: ${err.message}. Status unchanged.`,
-    );
-    return null;
+  const transitions = await getTransitions(key);
+  const match = pickTransition(transitions, candidates);
+  if (!match) {
+    throw new NoTransitionError(key, event, transitions.map((t) => t.name));
   }
+  await transitionIssue(key, match.id);
+  return match;
 }
 
 // Idempotent state transition: clears every PROGRESS_LABEL currently set,

@@ -81,8 +81,9 @@ export function getComplexity(labels) {
 // durable record of "in review", since an open PR is the real signal and a
 // label would only duplicate it.
 //
-// Best-effort by design — a workflow with no matching transition logs a
-// warning and leaves the status alone.
+// transitionForEvent throws NoTransitionError when a workflow has no
+// matching transition — callers decide how to surface that, rather than
+// the status silently staying put.
 export const STATUS_TRANSITIONS = Object.freeze({
   review: Object.freeze(["In Review", "Code Review", "Review"]),
   done: Object.freeze(["Done", "Closed", "Resolved", "Complete"]),
