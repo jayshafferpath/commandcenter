@@ -74,3 +74,8 @@ See README.md for setup, architecture, and feature docs.
 - Push-to-talk must only ever use a local-only Superwhisper mode. See
   `.plans/push-to-talk-wispr.md` before touching `pearl-speak.js` voice
   paths or `hammerspoon/pearl-ptt.lua`.
+- Pearl's speech relays through a throwaway, off-screen iTerm2 window
+  (session name `pearl-voice-relay`) so `say` can reach a Personal Voice —
+  see `pearl-speak.js`'s speech section. Don't name any iTerm2 session that
+  yourself — `pearl-speak.js` sweeps up any window with that name on its
+  next invocation.

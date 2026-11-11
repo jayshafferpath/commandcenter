@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  buildRelayScript,
   cleanForSpeech,
   extractLastAssistantText,
   isAtChatPrompt,
+  isITermRunning,
+  shQuote,
   summarizeForSpeech,
   transcriptText,
   truncateForSpeech,
@@ -174,5 +177,75 @@ describe("transcriptText", () => {
 
   it("returns an empty string when rawResult is missing", () => {
     expect(transcriptText(JSON.stringify({ llmResult: "only this" }))).toBe("");
+  });
+});
+
+describe("shQuote", () => {
+  it("wraps a plain value in single quotes", () => {
+    expect(shQuote("210")).toBe("'210'");
+  });
+
+  it("escapes embedded single quotes so a voice name with one stays one shell word", () => {
+    expect(shQuote("O'Brien")).toBe("'O'\\''Brien'");
+  });
+
+  it("quotes a value containing spaces, like a multi-word voice name", () => {
+    expect(shQuote("Ava (Premium)")).toBe("'Ava (Premium)'");
+  });
+});
+
+describe("buildRelayScript", () => {
+  it("backgrounds say, captures its own pid (not the shell's), and waits on it", () => {
+    const script = buildRelayScript(["-r", "210"], "12345");
+    expect(script).toContain("/usr/bin/say '-r' '210'");
+    expect(script).toContain("SAY_PID=$!");
+    expect(script).toContain("wait $SAY_PID");
+  });
+
+  it("quotes each say argument so a multi-word voice name survives as one argument", () => {
+    const script = buildRelayScript(["-v", "Ava (Premium)", "-r", "180"], "1");
+    expect(script).toContain("'-v' 'Ava (Premium)' '-r' '180'");
+  });
+
+  it("includes a watchdog that force-kills the same pid, bounding a hung say call", () => {
+    const script = buildRelayScript(["-r", "210"], "1");
+    expect(script).toMatch(/sleep \d+; kill -9 \$SAY_PID/);
+  });
+
+  it("closes the window it was given by id, after waiting on say", () => {
+    const script = buildRelayScript(["-r", "210"], "99887");
+    const waitLine = script.indexOf("wait $SAY_PID");
+    const closeLine = script.indexOf("window id 99887");
+    expect(closeLine).toBeGreaterThan(waitLine);
+  });
+});
+
+describe("isITermRunning", () => {
+  afterEach(() => {
+    execFileSync.mockReset();
+  });
+
+  it("is true when osascript reports iTerm2 is running", () => {
+    execFileSync.mockReturnValue("true\n");
+    expect(isITermRunning()).toBe(true);
+  });
+
+  it("is false when osascript reports iTerm2 is not running", () => {
+    execFileSync.mockReturnValue("false\n");
+    expect(isITermRunning()).toBe(false);
+  });
+
+  it("is false when osascript itself fails (no GUI session, not installed, etc.)", () => {
+    execFileSync.mockImplementation(() => {
+      throw new Error("not authorized");
+    });
+    expect(isITermRunning()).toBe(false);
+  });
+
+  it("checks without launching iTerm2 — asserts the non-launching `is running` form, not a bare `tell application`", () => {
+    execFileSync.mockReturnValue("true\n");
+    isITermRunning();
+    const [, args] = execFileSync.mock.calls[0];
+    expect(args.join(" ")).toContain("is running");
   });
 });

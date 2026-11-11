@@ -40,7 +40,9 @@ const SUMMARIZE_THRESHOLD_CHARS = 80;
 // timeout can't turn into reading a whole multi-paragraph reply aloud.
 const FALLBACK_MAX_CHARS = 250;
 
-const STATE_DIR = join(homedir(), ".pearl");
+// Overridable so tests/manual verification can point at a throwaway
+// directory instead of the real ~/.pearl a live Pearl session reads from.
+const STATE_DIR = process.env.PEARL_STATE_DIR?.trim() || join(homedir(), ".pearl");
 const LAST_REPLY_PATH = join(STATE_DIR, "last-reply.txt");
 const SAY_PID_PATH = join(STATE_DIR, "say.pid");
 // Set by `ask` so the reply to a spoken message is spoken back; the next
@@ -122,6 +124,16 @@ function readPid() {
   }
 }
 
+function isPidAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function hush() {
   const pid = readPid();
   rmSync(SAY_PID_PATH, { force: true });
@@ -134,16 +146,160 @@ export function hush() {
   }
 }
 
+export function shQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+// `say` run as a direct child of this (tmux-backed, headless) process never
+// reaches a Personal Voice or Siri's "natural" voices — confirmed by ear
+// that the identical `say` invocation run inside a plain (non-tmux) iTerm2
+// window does. AVSpeechSynthesizer's own per-app authorization route is a
+// dead end here: it needs the `com.apple.developer.personal-voice`
+// entitlement, which AMFI refuses to load on anything short of a paid-
+// account provisioning profile — no ad-hoc build can get it. Relaying
+// through a throwaway iTerm2 window sidesteps all of that, since it's
+// `say` itself (unmodified) doing the speaking either way. The window is
+// moved off-screen so it never flashes onto the display, but it's still a
+// real GUI window — that appears to be what the eligibility check actually
+// wants, not foreground focus.
+const SPEAK_BUFFER_PATH = join(STATE_DIR, "speak-buffer.txt");
+const SPEAK_SCRIPT_PATH = join(STATE_DIR, "speak-run.sh");
+const OSASCRIPT = "/usr/bin/osascript";
+// Tags every relay session so a leftover window (say hung, the self-close
+// line never ran, iTerm2 crashed) can be found and swept up later without
+// ever touching a window that happens to be the user's own.
+const RELAY_SESSION_NAME = "pearl-voice-relay";
+// Upper bound on one utterance's `say` call, independent of hush() — if
+// say ever hangs, this is what still gets the relay window closed instead
+// of leaking it forever. Well above anything summarizeForSpeech/
+// truncateForSpeech would ever hand it.
+const RELAY_WATCHDOG_SECONDS = 60;
+
+// `application ... is running` (rather than a bare `tell application`,
+// which auto-launches it) is what lets both this and the reaper below
+// skip cleanly instead of launching iTerm2 just to find out it isn't open.
+export function isITermRunning() {
+  try {
+    return (
+      execFileSync(OSASCRIPT, ["-e", 'application "iTerm2" is running'], {
+        encoding: "utf-8",
+      }).trim() === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Run once per pearl-speak.js invocation (main(), below) so a window
+// orphaned by a crash — this process killed mid-utterance, iTerm2 itself
+// restarting, anything short of the watchdog or hush() getting to it —
+// doesn't sit there (off-screen, so invisible) indefinitely. Start equals
+// recover: nothing here depends on a previous run having shut down clean.
+//
+// Gated on readPid() being dead/absent: a `hush` invocation reaps too
+// (every command does), and at that exact moment the recorded say pid is
+// still alive by definition — that's what's being hushed. Sweeping on
+// name alone would close that legitimate, still-speaking window out from
+// under it instead of leaving hush()'s own kill (and the script's `wait`
+// unblocking) to close it properly. Only reap once there's no live
+// speech to protect — at that point any window still carrying the marker
+// is guaranteed orphaned.
+function reapOrphanedRelayWindows() {
+  if (!isITermRunning()) return;
+  if (isPidAlive(readPid())) return;
+  try {
+    execFileSync(OSASCRIPT, [
+      "-e",
+      `tell application "iTerm2"
+  repeat with w in windows
+    try
+      if (name of current session of w) is "${RELAY_SESSION_NAME}" then close w
+    end try
+  end repeat
+end tell`,
+    ]);
+  } catch {
+    // reliability-allow err-no-swallow: best-effort cleanup of a cosmetic
+    // leak (an invisible, off-screen window) — failing here shouldn't
+    // block speech, and there's nothing more specific to log than
+    // "osascript failed," already implied by this being unreachable.
+  }
+}
+
+// Backgrounding `say` and capturing $! (not the shell's own $$) is what
+// puts say's real OS pid in SAY_PID_PATH, so hush()'s process.kill() still
+// stops the right process exactly as it does for a direct spawn — and
+// since `wait` unblocks as soon as that pid dies, hush() killing it is
+// also what makes the window close itself promptly on interrupt, not just
+// on natural completion. The watchdog subshell is the fallback for "say
+// hangs and nothing ever interrupts it": it force-kills the same pid
+// after RELAY_WATCHDOG_SECONDS, which unblocks `wait` the same way.
+export function buildRelayScript(sayArgs, windowId) {
+  return [
+    "#!/bin/bash",
+    `/usr/bin/say ${sayArgs.map(shQuote).join(" ")} < ${shQuote(SPEAK_BUFFER_PATH)} &`,
+    "SAY_PID=$!",
+    `echo $SAY_PID > ${shQuote(SAY_PID_PATH)}`,
+    `( sleep ${RELAY_WATCHDOG_SECONDS}; kill -9 $SAY_PID ) 2>/dev/null &`,
+    "WATCHDOG_PID=$!",
+    "wait $SAY_PID 2>/dev/null",
+    "kill $WATCHDOG_PID 2>/dev/null",
+    `osascript -e 'tell application "iTerm2" to close (window id ${windowId})'`,
+    "",
+  ].join("\n");
+}
+
+// Two round trips: the window has to exist before we can address it by id
+// in the script that runs inside it (and that it closes itself with).
+function speakViaITermWindow(sayArgs, bufferContent) {
+  writeFileSync(SPEAK_BUFFER_PATH, bufferContent);
+
+  const windowId = execFileSync(
+    OSASCRIPT,
+    [
+      "-e",
+      `tell application "iTerm2"
+  set w to (create window with default profile)
+  set bounds of w to {-3000, -3000, -2500, -2700}
+  set name of current session of w to "${RELAY_SESSION_NAME}"
+  return id of w
+end tell`,
+    ],
+    { encoding: "utf-8" },
+  ).trim();
+
+  writeFileSync(SPEAK_SCRIPT_PATH, buildRelayScript(sayArgs, windowId), { mode: 0o755 });
+
+  execFileSync(OSASCRIPT, [
+    "-e",
+    `tell application "iTerm2" to tell current session of (window id ${windowId}) to write text "bash ${SPEAK_SCRIPT_PATH}"`,
+  ]);
+}
+
+function speakDirect(sayArgs, bufferContent) {
+  const child = spawn("/usr/bin/say", sayArgs, {
+    detached: true,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
+  writeFileSync(SAY_PID_PATH, String(child.pid));
+  child.stdin.write(bufferContent);
+  child.stdin.end();
+  child.unref();
+}
+
 function speak(text) {
   hush();
 
-  // Siri voices aren't addressable via `say -v`; omitting -v uses the system voice set in Spoken Content.
+  // Siri/Personal voices aren't addressable via `say -v`; omitting -v uses
+  // whatever's set as the system voice in Spoken Content.
   const voice = process.env.PEARL_VOICE?.trim();
   const rate = process.env.PEARL_SPEECH_RATE?.trim() || "210";
   // `say` has no volume flag; the embedded [[volm]] command is the only knob.
   const volume = process.env.PEARL_SPEECH_VOLUME?.trim() || "0.4";
   const tone = process.env.PEARL_SPEECH_TONE?.trim() || "/System/Library/Sounds/Hero.aiff";
   const voiceArgs = voice ? ["-v", voice] : [];
+  const sayArgs = [...voiceArgs, "-r", rate];
+  const bufferContent = `[[volm ${volume}]] ${text}`;
 
   // Sync so the tone finishes before speech starts; a missing sound file
   // shouldn't cost the message itself.
@@ -151,14 +307,20 @@ function speak(text) {
     execFileSync("/usr/bin/afplay", ["-v", volume, tone]);
   } catch {}
 
-  const child = spawn("/usr/bin/say", [...voiceArgs, "-r", rate], {
-    detached: true,
-    stdio: ["pipe", "ignore", "ignore"],
-  });
-  writeFileSync(SAY_PID_PATH, String(child.pid));
-  child.stdin.write(`[[volm ${volume}]] ${text}`);
-  child.stdin.end();
-  child.unref();
+  // isITermRunning() keeps a closed iTerm2 from ever being launched just
+  // to relay through it — direct spawn is the path whenever it's not
+  // already open, not only when the relay itself errors out.
+  if (isITermRunning()) {
+    try {
+      speakViaITermWindow(sayArgs, bufferContent);
+      return;
+    } catch {
+      // Automation permission not granted yet, a transient AppleEvent
+      // failure, anything else — fall back below. Not Personal-Voice-
+      // capable, but Pearl still speaks.
+    }
+  }
+  speakDirect(sayArgs, bufferContent);
 }
 
 function speakLastReply() {
@@ -359,6 +521,7 @@ async function main() {
   if (process.platform !== "darwin") return;
 
   mkdirSync(STATE_DIR, { recursive: true });
+  reapOrphanedRelayWindows();
   const command = COMMANDS[process.argv[2]];
   if (command) return command();
   return captureReply();

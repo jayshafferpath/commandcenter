@@ -183,8 +183,28 @@ machine-specific paths this needs and wires it into `~/.hammerspoon/init.lua`
 idempotently. Superwhisper must still be set up with a local-only mode by
 hand; see `.plans/push-to-talk-wispr.md` for why and how.
 
+If your Spoken Content voice (System Settings → Accessibility → Spoken
+Content) is a Personal Voice or one of Siri's "natural" voices, `say` can't
+reach it directly — those only exist behind `AVSpeechSynthesizer`'s own
+per-app authorization, which `say` never asks for and architecturally can't
+be made to. Building a small signed app around `AVSpeechSynthesizer` doesn't
+get there either: actually speaking with a Personal Voice needs the
+`com.apple.developer.personal-voice` entitlement, which only a paid Apple
+Developer provisioning profile can grant — AMFI refuses to even load an
+ad-hoc-signed binary that claims it. What does work, confirmed by ear: the
+identical `say` call run inside a plain iTerm2 window *outside* tmux reaches
+the Personal Voice fine. So when iTerm2 is running, `pearl-speak.js` relays
+`say` through a throwaway iTerm2 window — moved off-screen so nothing
+flashes onto the display — instead of running it as a direct child of its
+own (tmux-backed) process; the window closes itself once `say` finishes (or
+is interrupted via `hush`), and any window orphaned by a crash gets swept up
+automatically the next time Pearl speaks. If iTerm2 isn't running, or the
+relay fails for any reason, `pearl-speak.js` falls back to the old direct
+`say` spawn — not Personal-Voice-capable, but it still speaks.
+
 Optional env: `PEARL_VOICE`, `PEARL_SPEECH_RATE`, `PEARL_SPEECH_VOLUME`,
-`PEARL_SPEECH_TONE`, `PEARL_SUPERWHISPER_BIN`, `PEARL_SUPERWHISPER_MODE`.
+`PEARL_SPEECH_TONE`, `PEARL_SUPERWHISPER_BIN`, `PEARL_SUPERWHISPER_MODE`,
+`PEARL_STATE_DIR` (overrides `~/.pearl`, for testing).
 
 ## Slack PR announcements
 
