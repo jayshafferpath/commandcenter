@@ -31,8 +31,8 @@ which Jira project todos go in. Tell them; don't pick a project.
 
 ## Complete
 
-`POST /api/todos/:key/complete` moves the todo to its workflow's done state.
+`POST /api/todos/:key/complete` moves the todo to its workflow's done state,
+returning `ok: true` once it has.
 
-It returns `ok: true` even when the workflow has no done-like transition and
-nothing changed. When it matters, confirm with `GET /api/todos` that the
-todo is gone before telling the user it's done.
+A 409 means the workflow has no done-like transition — the error names the
+todo and the transitions that were available. Tell the user; don't retry.

@@ -12,6 +12,7 @@ import {
   createIssue,
   getCurrentUser,
   transitionForEvent,
+  NoMatchingTransitionError,
 } from "./lib/jira.js";
 import { isPrUrl, searchMyPrs, viewPr } from "./lib/pr.js";
 import { adfToPlainText } from "./lib/adf.js";
@@ -345,6 +346,10 @@ app.post("/api/todos/:key/complete", async (request, reply) => {
     await transitionForEvent(request.params.key, "done");
     return { ok: true };
   } catch (err) {
+    if (err instanceof NoMatchingTransitionError) {
+      reply.code(409);
+      return { ok: false, error: err.message };
+    }
     reply.code(400);
     return { ok: false, error: err.message };
   }
