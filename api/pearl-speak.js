@@ -110,7 +110,9 @@ export function summarizeForSpeech(text) {
       "claude",
       [
         "-p",
-        `Summarize the core idea of this in one short spoken sentence. No preamble, no quotes, just the sentence:\n\n${text}`,
+        // "Summarize" made haiku narrate from outside ("Pearl says..."); asking
+        // for a first-person rewrite keeps the spoken line in her own voice.
+        `Rewrite this message as one short spoken sentence, in the speaker's own first-person voice, talking directly to the listener. Don't describe the message or mention who wrote it. No preamble, no quotes, just the sentence:\n\n${text}`,
         "--model",
         "haiku",
       ],
