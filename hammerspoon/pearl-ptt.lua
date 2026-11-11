@@ -18,26 +18,47 @@
 -- `languageModelName` field at all.
 --
 -- Setup:
---   1. Set COMMANDCENTER_ROOT, NODE_BIN, and SUPERWHISPER_BIN below to
---      match this machine (`which node` / `which superwhisper`, or for
---      superwhisper specifically, ~/.local/bin/superwhisper if its
---      install-cli.sh put it there).
---   2. Once you've set up a local-only mode in Superwhisper, put its mode
---      key here as PEARL_SUPERWHISPER_MODE so `preflight` pins it before
---      every recording — otherwise it just uses whatever mode is already
+--   install.sh auto-generates pearl-ptt.local.lua (gitignored, sibling to
+--   this file) with COMMANDCENTER_ROOT/NODE_BIN/SUPERWHISPER_BIN/
+--   HOMEBREW_PREFIX detected for this machine — it's never overwritten once
+--   it exists, so hand-edits (e.g. a corrected path) survive a re-run. The
+--   one thing that still needs a human:
+--   1. Set up a local-only mode in Superwhisper, then put its mode key in
+--      pearl-ptt.local.lua's PEARL_SUPERWHISPER_MODE so `preflight` pins it
+--      before every recording — otherwise it uses whatever mode is already
 --      active, which could be a cloud one.
---   3. Pick a hotkey that isn't bound to anything else. Insert is the
+--   2. Pick a hotkey that isn't bound to anything else. Insert is the
 --      default; macOS reports a PC keyboard's Insert as "help".
---   4. Reload Hammerspoon's config (menu bar icon → Reload Config).
+--   3. Reload Hammerspoon's config (menu bar icon → Reload Config).
 
-local COMMANDCENTER_ROOT = os.getenv("HOME") .. "/dev/commandcenter"
-local NODE_BIN = os.getenv("HOME") .. "/.asdf/shims/node"
-local SUPERWHISPER_BIN = os.getenv("HOME") .. "/.local/bin/superwhisper"
+-- Loaded by file path (debug.getinfo), not `require`, so this works
+-- regardless of whatever package.path Hammerspoon's own init.lua set up.
+local function scriptDir()
+  local source = debug.getinfo(1, "S").source:sub(2)
+  return source:match("(.*/)") or "./"
+end
+
+local function loadLocalOverrides()
+  local path = scriptDir() .. "pearl-ptt.local.lua"
+  local file = io.open(path, "r")
+  if not file then return {} end
+  file:close()
+  local ok, result = pcall(dofile, path)
+  if ok and type(result) == "table" then return result end
+  return {}
+end
+
+local overrides = loadLocalOverrides()
+
+local COMMANDCENTER_ROOT = overrides.COMMANDCENTER_ROOT or (os.getenv("HOME") .. "/dev/commandcenter")
+local NODE_BIN = overrides.NODE_BIN or (os.getenv("HOME") .. "/.asdf/shims/node")
+local SUPERWHISPER_BIN = overrides.SUPERWHISPER_BIN or (os.getenv("HOME") .. "/.local/bin/superwhisper")
+local HOMEBREW_PREFIX = overrides.HOMEBREW_PREFIX or "/opt/homebrew"
 -- "default" mode (key "default") is set up with a local Parakeet voice
 -- model and no language-model stage — verified via its JSON under
 -- ~/superwhisper/modes/. "pro" has the same local voice model but still
 -- runs a cloud language-model cleanup pass; don't switch to that one here.
-local PEARL_SUPERWHISPER_MODE = "default"
+local PEARL_SUPERWHISPER_MODE = overrides.PEARL_SUPERWHISPER_MODE or "default"
 
 local PEARL_SPEAK = COMMANDCENTER_ROOT .. "/api/pearl-speak.js"
 
@@ -55,7 +76,7 @@ local function runPearlSpeak(args)
     SUPERWHISPER_MODES = os.getenv("HOME") .. "/superwhisper/modes",
     HOME = os.getenv("HOME"),
     -- The asdf node shim execs `asdf`, which lives in Homebrew.
-    PATH = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    PATH = HOMEBREW_PREFIX .. "/bin:/usr/bin:/bin:/usr/sbin:/sbin",
   })
   task:start()
   return task

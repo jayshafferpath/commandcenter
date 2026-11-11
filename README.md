@@ -9,18 +9,33 @@ away in a real terminal.
 ## Install
 
 ```bash
-./install.sh
+./install.sh            # core setup only
+./install.sh --all      # + Atlassian MCP registration + push-to-talk setup
+./install.sh --mcp      # + Atlassian MCP registration only
+./install.sh --ptt      # + push-to-talk setup only
 ```
 
-Installs dependencies, creates `.env` from the template, checks for `tmux`
-and iTerm2 (both required at runtime — see Architecture below), and
-registers the Atlassian MCP server with Claude Code if it isn't already.
+Core (always runs): installs dependencies, creates `.env` from the
+template, symlinks `commands/` into `~/.claude/commands`, and checks for
+`tmux`, iTerm2, `gh`, and Hammerspoon (`tmux` and iTerm2 are required at
+runtime — see Architecture below; `gh` and Hammerspoon are only needed for
+the PR column and push-to-talk voice input, respectively).
 
+Optional, off by default — pick what you actually use:
+
+- `--mcp` registers the Atlassian MCP server with Claude Code (Pearl's Jira
+  work goes through it)
+- `--ptt` sets up push-to-talk voice input for Pearl (see Pearl's voice,
+  below)
+
+`install.sh` defaults `DEV_ROOT` to commandcenter's own parent directory
+(it's always a repo under your `DEV_ROOT`) — adjust it if that's wrong.
 Then fill in `.env`:
 
 - `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_DOMAIN` — Jira Cloud credentials
-- `DEV_ROOT` — parent directory of your repo clones (tickets resolve to a
-  repo via a `repo:<name>` label → `$DEV_ROOT/<name>`)
+- `TODO_PROJECT_KEY` — Jira project key new todos get created in. No
+  default (a project key is specific to one person's Jira instance); the
+  Todos column's add-todo form returns a clear error until this is set.
 - Everything else in `.env.example` is optional, with sane defaults.
 
 ## Run
@@ -57,9 +72,8 @@ attach to and drive them directly from a terminal, not just watch a log —
 and opening that terminal window uses `osascript` to drive iTerm2. Both are
 macOS-only requirements.
 
-By default, write actions (dispatching an agent, running Pearl) are
-disabled — the dashboard shows what it *would* run as copy-to-clipboard
-only. Set `DASHBOARD_ALLOW_ACTIONS=true` to let it actually run them.
+Write actions (dispatching an agent, running Pearl, ticket cleanup/promote)
+always run — there's no env gate or UI toggle to disable them.
 
 ## Dispatch
 
@@ -101,8 +115,11 @@ A Stop hook, scoped to Pearl's session only, caches a condensed version of
 each reply. `api/pearl-speak.js` speaks it on demand (`say`), stops it
 (`hush`), and handles voice input: `ask "<text>"` from any dictation tool,
 or the `preflight`/`voice` push-to-talk pair driven by Superwhisper's CLI
-through `hammerspoon/pearl-ptt.lua` (held Insert key). Superwhisper must be
-on a local-only mode; see `.plans/push-to-talk-wispr.md` for why and how.
+through `hammerspoon/pearl-ptt.lua` (held Insert key). `./install.sh --ptt`
+auto-generates `hammerspoon/pearl-ptt.local.lua` (gitignored) with the
+machine-specific paths this needs and wires it into `~/.hammerspoon/init.lua`
+idempotently. Superwhisper must still be set up with a local-only mode by
+hand; see `.plans/push-to-talk-wispr.md` for why and how.
 
 Optional env: `PEARL_VOICE`, `PEARL_SPEECH_RATE`, `PEARL_SPEECH_VOLUME`,
 `PEARL_SPEECH_TONE`, `PEARL_SUPERWHISPER_BIN`, `PEARL_SUPERWHISPER_MODE`.
@@ -126,5 +143,4 @@ to lay out the message itself can use the other fields instead:
 
 Each PR posts at most once. Posted PRs are recorded by URL in
 `~/.commandcenter/slack-posted-prs.json`; asking again for one already there
-returns `alreadyPosted` without posting. Requires
-`DASHBOARD_ALLOW_ACTIONS=true`, like the dashboard's other write actions.
+returns `alreadyPosted` without posting.

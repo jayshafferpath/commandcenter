@@ -3,14 +3,51 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Core setup (deps, .env, commands symlink, dependency checks) always runs.
+# The rest is opt-in per feature — pick what you actually use.
+WITH_MCP=false
+WITH_PTT=false
+
+usage() {
+  echo "Usage: ./install.sh [options]"
+  echo ""
+  echo "Always runs: npm install, .env setup, commands/ symlinks, tmux/iTerm2/gh/Hammerspoon checks."
+  echo ""
+  echo "Optional (off by default):"
+  echo "  --mcp       Register the Atlassian MCP server (needed for Pearl's Jira work)"
+  echo "  --ptt       Set up push-to-talk voice input for Pearl (Hammerspoon + Superwhisper glue)"
+  echo "  --all       Enable all of the above"
+  echo "  -h, --help  Show this help"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --mcp) WITH_MCP=true ;;
+    --ptt) WITH_PTT=true ;;
+    --all) WITH_MCP=true; WITH_PTT=true ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "Unknown option: $arg"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
 echo "Installing Command Center dependencies..."
 (cd "$SCRIPT_DIR" && npm install)
 
 # .env holds the credentials/config the API reads via api/lib/env.js (loadEnv).
 if [ ! -f "$SCRIPT_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
   cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+  # commandcenter is itself always a repo under DEV_ROOT, so its own parent
+  # directory is the right default rather than leaving the template's
+  # placeholder in place.
+  DEV_ROOT_DEFAULT="$(dirname "$SCRIPT_DIR")"
+  sed -i '' "s#^DEV_ROOT=.*#DEV_ROOT=$DEV_ROOT_DEFAULT#" "$SCRIPT_DIR/.env"
   echo ""
-  echo "  Created $SCRIPT_DIR/.env from template — fill in your credentials"
+  echo "  Created $SCRIPT_DIR/.env from template (DEV_ROOT defaulted to $DEV_ROOT_DEFAULT)"
+  echo "  Fill in JIRA_EMAIL, JIRA_API_TOKEN, JIRA_DOMAIN"
 fi
 
 echo ""
@@ -72,41 +109,156 @@ else
   echo "  Warning: osascript not found — this dashboard's terminal-opening features require macOS."
 fi
 
-echo ""
-echo "Setting up MCP servers..."
-
-# Pearl is a real interactive `claude` session (see api/pearl.js) — Jira work
-# she does goes through the Atlassian MCP server, not this project's own REST
-# calls. Registered at user scope so it's available in every project, not
-# just this one.
-MCP_NAME="atlassian"
-MCP_URL="https://mcp.atlassian.com/v1/mcp"
-if ! command -v claude >/dev/null 2>&1; then
-  echo "  Warning: claude CLI not found — skipping MCP setup."
-  echo "    Install Claude Code, then run: claude mcp add --transport http $MCP_NAME $MCP_URL -s user"
-elif claude mcp list 2>/dev/null | grep -q "^$MCP_NAME:"; then
-  echo "  $MCP_NAME MCP server already registered"
-else
-  echo "  Registering $MCP_NAME MCP server (user scope)..."
-  if claude mcp add --transport http "$MCP_NAME" "$MCP_URL" -s user; then
-    echo "  Registered — authenticate it with: claude mcp list"
+# gh backs the PR column, PR announce, and the PR-state checks several
+# lifecycle commands rely on. Missing or unauthenticated, the PR column just
+# renders empty with no explanation why.
+if command -v gh >/dev/null 2>&1; then
+  if gh auth status >/dev/null 2>&1; then
+    echo "  gh found and authenticated"
   else
-    echo "  Warning: failed to register $MCP_NAME automatically."
-    echo "    Run manually: claude mcp add --transport http $MCP_NAME $MCP_URL -s user"
+    echo "  Warning: gh found but not authenticated — the PR column will stay empty."
+    echo "    Run: gh auth login"
   fi
+else
+  echo "  Warning: gh not found — the PR column and PR announce require it."
+  echo "    Install with: brew install gh"
+fi
+
+# Hammerspoon drives Pearl's push-to-talk hotkey (hammerspoon/pearl-ptt.lua) —
+# optional, only needed for voice input. See .plans/push-to-talk-wispr.md.
+if [ -d "/Applications/Hammerspoon.app" ]; then
+  echo "  Hammerspoon found"
+else
+  echo "  Note: Hammerspoon not found — only needed for push-to-talk voice input to Pearl."
+  echo "    Install from: https://www.hammerspoon.org"
+fi
+
+if [ "$WITH_MCP" = true ]; then
+  echo ""
+  echo "Setting up MCP servers..."
+
+  # Pearl is a real interactive `claude` session (see api/pearl.js) — Jira
+  # work she does goes through the Atlassian MCP server, not this project's
+  # own REST calls. Registered at user scope so it's available in every
+  # project, not just this one.
+  MCP_NAME="atlassian"
+  MCP_URL="https://mcp.atlassian.com/v2/mcp"
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "  Warning: claude CLI not found — skipping MCP setup."
+    echo "    Install Claude Code, then run: claude mcp add --transport http $MCP_NAME $MCP_URL -s user"
+  elif claude mcp list 2>/dev/null | grep -q "^$MCP_NAME:"; then
+    echo "  $MCP_NAME MCP server already registered"
+  else
+    echo "  Registering $MCP_NAME MCP server (user scope)..."
+    if claude mcp add --transport http "$MCP_NAME" "$MCP_URL" -s user; then
+      echo "  Registered — authenticate it with: claude mcp list"
+    else
+      echo "  Warning: failed to register $MCP_NAME automatically."
+      echo "    Run manually: claude mcp add --transport http $MCP_NAME $MCP_URL -s user"
+    fi
+  fi
+else
+  echo ""
+  echo "Skipping MCP setup (pass --mcp or --all to enable)."
+fi
+
+if [ "$WITH_PTT" = true ]; then
+  echo ""
+  echo "Setting up push-to-talk voice input (Pearl)..."
+
+  # The machine-specific bits of pearl-ptt.lua (repo location, node path,
+  # superwhisper path, homebrew prefix) used to require hand-editing a
+  # tracked file on every new machine. This generates a gitignored override
+  # file instead — same pattern as .env/.env.example. Never overwritten once
+  # it exists, so machine-specific hand-edits (e.g. a corrected node path)
+  # survive a re-run.
+  HS_LOCAL="$SCRIPT_DIR/hammerspoon/pearl-ptt.local.lua"
+  if [ -f "$HS_LOCAL" ]; then
+    echo "  $HS_LOCAL already exists — leaving it alone"
+  else
+    NODE_BIN_DETECTED="$(command -v node || true)"
+    SUPERWHISPER_DETECTED="$(command -v superwhisper || true)"
+    if [ -z "$SUPERWHISPER_DETECTED" ]; then
+      SUPERWHISPER_DETECTED="$HOME/.local/bin/superwhisper"
+    fi
+    if command -v brew >/dev/null 2>&1; then
+      BREW_PREFIX="$(brew --prefix)"
+    else
+      BREW_PREFIX="/opt/homebrew"
+    fi
+    if [ -z "$NODE_BIN_DETECTED" ]; then
+      NODE_BIN_DETECTED="$HOME/.asdf/shims/node"
+    fi
+
+    cat > "$HS_LOCAL" <<EOF
+-- Auto-generated by install.sh for this machine. Edit freely — install.sh
+-- never overwrites this file once it exists. See pearl-ptt.lua for how
+-- these are used.
+return {
+  COMMANDCENTER_ROOT = "$SCRIPT_DIR",
+  NODE_BIN = "$NODE_BIN_DETECTED",
+  SUPERWHISPER_BIN = "$SUPERWHISPER_DETECTED",
+  HOMEBREW_PREFIX = "$BREW_PREFIX",
+  -- Must point at a Superwhisper mode that's local-only (a Whisper/Parakeet
+  -- voice model, type "voice", no language-model stage) — see
+  -- .plans/push-to-talk-wispr.md. "default" is a placeholder: verify it on
+  -- this machine (or set up a new mode) before relying on it.
+  PEARL_SUPERWHISPER_MODE = "default",
+}
+EOF
+    echo "  Wrote $HS_LOCAL"
+    echo "    node: ${NODE_BIN_DETECTED:-not found}"
+    echo "    superwhisper: $SUPERWHISPER_DETECTED"
+    echo "    homebrew: $BREW_PREFIX"
+  fi
+
+  # Wires pearl-ptt.lua into Hammerspoon's own config, idempotently — same
+  # check-before-write approach as the commands/ symlinks above. Append-only:
+  # never touches anything already in init.lua. Checks loosely for
+  # "pearl-ptt" rather than this exact dofile string, since an existing
+  # setup may have wired it via `require` + a package.path tweak instead —
+  # still valid, shouldn't be duplicated.
+  HS_INIT="$HOME/.hammerspoon/init.lua"
+  mkdir -p "$HOME/.hammerspoon"
+  if [ -f "$HS_INIT" ] && grep -qF "pearl-ptt" "$HS_INIT"; then
+    echo "  $HS_INIT already wired to pearl-ptt.lua"
+  else
+    {
+      echo ""
+      echo "-- Added by commandcenter's install.sh"
+      echo "dofile(\"$SCRIPT_DIR/hammerspoon/pearl-ptt.lua\")"
+    } >> "$HS_INIT"
+    echo "  Appended pearl-ptt.lua to $HS_INIT"
+    echo "    Reload Hammerspoon's config (menu bar icon -> Reload Config) to pick it up"
+  fi
+else
+  echo ""
+  echo "Skipping push-to-talk setup (pass --ptt or --all to enable)."
 fi
 
 echo ""
 echo "Done."
 echo ""
 echo "Next steps:"
-echo "  1. Edit $SCRIPT_DIR/.env — set JIRA_EMAIL, JIRA_API_TOKEN, JIRA_DOMAIN, DEV_ROOT"
+echo "  1. Edit $SCRIPT_DIR/.env — set JIRA_EMAIL, JIRA_API_TOKEN, JIRA_DOMAIN"
+echo "     (DEV_ROOT was defaulted above — adjust if that's wrong)"
 echo "  2. Optionally set PEARL_NAME in that same .env to rename the supervisor agent"
 echo "     (defaults to \"Pearl\" if unset)"
-echo "  3. Optionally set DASHBOARD_ALLOW_ACTIONS=true to let the dashboard run"
-echo "     lifecycle commands and spawn agents instead of only suggesting them"
-echo "  4. If the atlassian MCP server was just registered, authenticate it"
-echo "     (run 'claude' and approve the OAuth prompt on first use)"
+if [ "$WITH_MCP" = true ]; then
+  echo "  3. If the atlassian MCP server was just registered, authenticate it"
+  echo "     (run 'claude' and approve the OAuth prompt on first use)"
+else
+  echo "  3. Pearl's Jira work needs the Atlassian MCP server — re-run with --mcp"
+  echo "     (or --all) when you want it"
+fi
+if [ "$WITH_PTT" = true ]; then
+  echo "  4. For push-to-talk voice input: set up a local-only Superwhisper mode"
+  echo "     and grant Hammerspoon's Accessibility permission on first launch"
+  echo "     — see .plans/push-to-talk-wispr.md"
+else
+  echo "  4. Push-to-talk voice input for Pearl wasn't set up — re-run with --ptt"
+  echo "     (or --all) when you want it"
+fi
 echo "  5. Run: npm run dev"
 echo "     This starts both the API (port 3789) and the Vite dev server (port 5173)"
 echo "  6. Open http://localhost:5173"

@@ -102,14 +102,17 @@ hotkey — not after.
    (key `"default"`) uses a local Parakeet voice model
    (`nvidia_parakeet-v2_476MB`) with no language-model stage, confirmed via
    its JSON under `~/superwhisper/modes/`. `PEARL_SUPERWHISPER_MODE` in
-   `hammerspoon/pearl-ptt.lua` is set to `"default"` accordingly. (`pro` got
-   the same local voice model but still has a cloud language-model cleanup
-   stage — don't point this integration at it.)
+   `hammerspoon/pearl-ptt.local.lua` (install.sh-generated, gitignored,
+   loaded by `pearl-ptt.lua` as an override) is set to `"default"`
+   accordingly. (`pro` got the same local voice model but still has a cloud
+   language-model cleanup stage — don't point this integration at it.) On a
+   new machine, verify the mode install.sh's default actually resolves to a
+   local-only one before relying on it.
 2. ~~Install Hammerspoon.~~ Done.
-3. `~/.hammerspoon/init.lua` is wired up to `require` this repo's
-   `hammerspoon/pearl-ptt.lua` directly (not a copy) — editing the file in
-   this repo is editing the live config. Still needed: open Hammerspoon
-   once and grant its Accessibility permission prompt when macOS shows it.
+3. ~~Wire `~/.hammerspoon/init.lua` to this repo's `hammerspoon/pearl-ptt.lua`.~~
+   Done — install.sh appends a `dofile(...)` line idempotently. Still
+   needed: open Hammerspoon once and grant its Accessibility permission
+   prompt when macOS shows it.
 4. Reload Hammerspoon's config after that (menu bar icon → Reload Config)
    and confirm Insert (reported by macOS as `help`, the hotkey bound in
    `pearl-ptt.lua`) is actually free on this keyboard.

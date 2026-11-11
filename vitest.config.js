@@ -9,5 +9,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ["tests/**/*.test.{js,jsx}"],
+    // Default pool (forks) crashes before running anything — tinypool fails
+    // to deserialize a worker error over IPC. Reproduces on Node 20.5 and
+    // 24.18, so it's not a single-Node-version issue; threads pool doesn't
+    // hit it.
+    pool: "threads",
   },
 });

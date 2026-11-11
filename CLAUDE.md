@@ -7,8 +7,10 @@ See README.md for setup, architecture, and feature docs.
 ## Commands
 
 - `npm run dev` — API on 3789 (`node --watch`) and Vite on 5173
-- `npm test` — Vitest. On Node 20.5 the default pool crashes before running
-  anything; use `npx vitest run --pool=threads`.
+- `npm test` — Vitest, pinned to `pool: "threads"` in `vitest.config.js`
+  (the default forks pool crashes before running anything on Node 20.5 and
+  24.18 both — a tinypool IPC-deserialize bug, not a single-Node-version
+  issue).
 - `npm run build` — Vite build of `ui/`
 
 ## Layout
@@ -31,9 +33,8 @@ See README.md for setup, architecture, and feature docs.
   `node --input-type=module -e` with `import`, not `require`.
 - Comments explain why — design history, a rejected approach, a race being
   avoided. Match that density; don't narrate what the code does.
-- Write actions (dispatch, Pearl, closing a live session, Slack posts) are gated
-  on `DASHBOARD_ALLOW_ACTIONS=true` via `isExecutionEnabled()`. Gate any new
-  write action the same way.
+- Write actions (dispatch, Pearl, closing a live session, Slack posts) always
+  run — no env gate, no UI toggle.
 - macOS only: tmux for every session, `osascript` to open iTerm2.
 
 ## Pearl
