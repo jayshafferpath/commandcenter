@@ -3,13 +3,19 @@
 // user's home dir rather than the job's cwd, because a dispatched agent
 // runs in whatever repo the ticket resolved to, not in this one.
 //
-//   ~/.commandcenter/brain/<jobId>/canvas.md
+//   ~/.commandcenter/brain/<jobId>/canvas.md    Markdown (+ Mermaid)
+//   ~/.commandcenter/brain/<jobId>/canvas.html  a full HTML page, sandboxed
+//
+// A sibling file rather than sniffing canvas.md for a leading <!doctype>:
+// Markdown can legitimately start with a literal "<", and the agent picking
+// a filename is a clearer signal than any guess about its content.
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const CANVAS_FILENAME = "canvas.md";
+const HTML_CANVAS_FILENAME = "canvas.html";
 
 // A function, not a module-level constant, so tests can mock os.homedir()
 // and have it take effect — a constant would freeze in whatever homedir()
@@ -24,6 +30,26 @@ export function brainDirFor(jobId) {
 
 export function canvasPathFor(jobId) {
   return join(brainDirFor(jobId), CANVAS_FILENAME);
+}
+
+export function htmlCanvasPathFor(jobId) {
+  return join(brainDirFor(jobId), HTML_CANVAS_FILENAME);
+}
+
+function hasContent(path) {
+  return existsSync(path) && statSync(path).size > 0;
+}
+
+// A non-empty canvas.html wins over canvas.md: an agent that has started
+// building a page wants that page shown, and emptying canvas.html is how it
+// hands the view back to its Markdown. Falls back to canvas.md even when
+// that's empty too, so an untouched canvas still reads as present-but-blank.
+export function activeCanvas(jobId) {
+  const htmlPath = htmlCanvasPathFor(jobId);
+  if (hasContent(htmlPath)) return { format: "html", path: htmlPath };
+  const markdownPath = canvasPathFor(jobId);
+  if (existsSync(markdownPath)) return { format: "markdown", path: markdownPath };
+  return null;
 }
 
 // Called once, at dispatch time, before the job's composedPrompt (which
@@ -44,17 +70,16 @@ export function ensureBrainDir(jobId) {
 // whether or not anything was ever written there. This checks for actual
 // content instead, which is what makes the link opt-in in practice.
 export function hasBrainContent(jobId) {
-  const canvasPath = canvasPathFor(jobId);
-  if (!existsSync(canvasPath)) return false;
-  return statSync(canvasPath).size > 0;
+  return hasContent(htmlCanvasPathFor(jobId)) || hasContent(canvasPathFor(jobId));
 }
 
 export function readBrain(jobId) {
-  const canvasPath = canvasPathFor(jobId);
-  if (!existsSync(canvasPath)) return null;
+  const canvas = activeCanvas(jobId);
+  if (!canvas) return null;
   return {
-    content: readFileSync(canvasPath, "utf-8"),
-    updatedAt: statSync(canvasPath).mtime.toISOString(),
+    format: canvas.format,
+    content: readFileSync(canvas.path, "utf-8"),
+    updatedAt: statSync(canvas.path).mtime.toISOString(),
   };
 }
 

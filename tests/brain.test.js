@@ -13,8 +13,18 @@ vi.mock("node:os", async (importOriginal) => {
   return { ...actual, homedir: () => fakeHome };
 });
 
-const { brainDirFor, brainInstructions, canvasPathFor, ensureBrainDir, hasBrainContent, readBrain } =
-  await import("../api/brain.js");
+const {
+  activeCanvas,
+  brainDirFor,
+  brainInstructions,
+  canvasPathFor,
+  ensureBrainDir,
+  hasBrainContent,
+  htmlCanvasPathFor,
+  readBrain,
+} = await import("../api/brain.js");
+
+const PAGE = "<!doctype html><html><body><h1>Design</h1></body></html>";
 
 beforeEach(() => {
   fakeHome = mkdtempSync(join(tmpdir(), "brain-test-"));
@@ -58,6 +68,50 @@ describe("hasBrainContent", () => {
     writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
     expect(hasBrainContent("job-1")).toBe(true);
   });
+
+  it("is true when only canvas.html has content", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(htmlCanvasPathFor("job-1"), PAGE, "utf-8");
+    expect(hasBrainContent("job-1")).toBe(true);
+  });
+
+  it("is true when both canvases have content", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
+    writeFileSync(htmlCanvasPathFor("job-1"), PAGE, "utf-8");
+    expect(hasBrainContent("job-1")).toBe(true);
+  });
+
+  it("is false when both canvases exist but are empty", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(htmlCanvasPathFor("job-1"), "", "utf-8");
+    expect(hasBrainContent("job-1")).toBe(false);
+  });
+});
+
+describe("activeCanvas", () => {
+  it("is null when neither canvas exists", () => {
+    expect(activeCanvas("job-1")).toBeNull();
+  });
+
+  it("is the Markdown canvas when there's no canvas.html", () => {
+    ensureBrainDir("job-1");
+    expect(activeCanvas("job-1")).toEqual({ format: "markdown", path: canvasPathFor("job-1") });
+  });
+
+  it("prefers a non-empty canvas.html over canvas.md", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
+    writeFileSync(htmlCanvasPathFor("job-1"), PAGE, "utf-8");
+    expect(activeCanvas("job-1")).toEqual({ format: "html", path: htmlCanvasPathFor("job-1") });
+  });
+
+  it("falls back to canvas.md once canvas.html is emptied", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
+    writeFileSync(htmlCanvasPathFor("job-1"), "", "utf-8");
+    expect(activeCanvas("job-1")).toEqual({ format: "markdown", path: canvasPathFor("job-1") });
+  });
 });
 
 describe("readBrain", () => {
@@ -69,8 +123,18 @@ describe("readBrain", () => {
     ensureBrainDir("job-1");
     writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
     const brain = readBrain("job-1");
+    expect(brain.format).toBe("markdown");
     expect(brain.content).toBe("# notes");
     expect(typeof brain.updatedAt).toBe("string");
+  });
+
+  it("serves canvas.html, tagged as html, when it has content", () => {
+    ensureBrainDir("job-1");
+    writeFileSync(canvasPathFor("job-1"), "# notes", "utf-8");
+    writeFileSync(htmlCanvasPathFor("job-1"), PAGE, "utf-8");
+    const brain = readBrain("job-1");
+    expect(brain.format).toBe("html");
+    expect(brain.content).toBe(PAGE);
   });
 
   it("reflects a full rewrite", () => {
@@ -86,6 +150,9 @@ describe("brainDirFor / canvasPathFor", () => {
     expect(brainDirFor("job-1")).toBe(join(fakeHome, ".commandcenter", "brain", "job-1"));
     expect(canvasPathFor("job-1")).toBe(
       join(fakeHome, ".commandcenter", "brain", "job-1", "canvas.md"),
+    );
+    expect(htmlCanvasPathFor("job-1")).toBe(
+      join(fakeHome, ".commandcenter", "brain", "job-1", "canvas.html"),
     );
   });
 

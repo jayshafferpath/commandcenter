@@ -1198,6 +1198,17 @@ body {
   line-height: 1.6;
 }
 
+/* White, not the board's sunken background: an HTML canvas is a page of
+   its own, and one that never sets a background should look the way it
+   would opened standalone, not dark-on-dark. */
+.brain-panel-frame {
+  flex: 1;
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
 .brain-panel-body :first-child {
   margin-top: 0;
 }
