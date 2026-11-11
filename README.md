@@ -136,8 +136,13 @@ tab, or directly — it's read fresh every time she spins up. The ↻ button nex
 restarts her session so edits take effect, discarding her current
 conversation.
 
-Pearl runs pinned to Opus in `auto` permission mode, named `PEARL_NAME` so
-dispatched agents can reach her with `SendMessage`.
+Pearl runs pinned to Opus in `auto` permission mode. Her name comes from
+`PEARL_NAME` in `.env` (default `Pearl`) and drives both her tmux session —
+`ccenter-<slugified-name>`, e.g. `ccenter-pearl` by default — and the
+`SendMessage({to: PEARL_NAME})` address dispatched agents use to reach her.
+Hammerspoon launches `pearl-speak.js` directly with its own minimal
+environment, so it (and `server.js`) load `.env` explicitly rather than
+relying on it being inherited.
 
 ## Pearl's memory
 
