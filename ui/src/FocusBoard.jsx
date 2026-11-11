@@ -28,7 +28,6 @@ export function FocusBoard() {
   const [activeTab, setActiveTab] = useState("tickets");
   const [tickets, setTickets] = useState([]);
   const [jiraBaseUrl, setJiraBaseUrl] = useState(null);
-  const [actionsEnabled, setActionsEnabled] = useState(false);
   const [pearlName, setPearlName] = useState("Pearl");
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +41,6 @@ export function FocusBoard() {
       const data = await res.json();
       setTickets(data.tickets || []);
       setJiraBaseUrl(data.jiraBaseUrl);
-      setActionsEnabled(data.actionsEnabled === true);
       if (data.pearlName) setPearlName(data.pearlName);
       setError(null);
     } catch (err) {
@@ -229,7 +227,7 @@ export function FocusBoard() {
           <span className="focus-wordmark-text">Command Center</span>
         </h1>
         <div className="focus-header-actions">
-          <PearlButton actionsEnabled={actionsEnabled} name={pearlName} />
+          <PearlButton name={pearlName} />
           <button className="btn" onClick={fetchTickets}>
             Refresh
           </button>
@@ -272,11 +270,7 @@ export function FocusBoard() {
 
         <div className="focus-column-sessions-stack">
           <SessionColumn jobs={jobs} onRefresh={fetchJobs} onClose={closeSession} />
-          <DispatchBar
-            onDispatch={requestDispatch}
-            actionsEnabled={actionsEnabled}
-            error={dispatchError}
-          />
+          <DispatchBar onDispatch={requestDispatch} error={dispatchError} />
         </div>
       </div>
 

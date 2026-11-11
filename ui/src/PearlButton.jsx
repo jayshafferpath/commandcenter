@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 
-export function PearlButton({ actionsEnabled, name = "Pearl" }) {
+export function PearlButton({ name = "Pearl" }) {
   const [state, setState] = useState("idle"); // idle | opening | refreshing | error
   const [error, setError] = useState(null);
   const busy = state === "opening" || state === "refreshing";
@@ -60,12 +60,8 @@ export function PearlButton({ actionsEnabled, name = "Pearl" }) {
         type="button"
         className="btn pearl-toggle"
         onClick={open}
-        disabled={!actionsEnabled || busy}
-        title={
-          !actionsEnabled
-            ? `${name} is disabled (set DASHBOARD_ALLOW_ACTIONS=true)`
-            : `Open ${name} — creates her session if it doesn't exist yet`
-        }
+        disabled={busy}
+        title={`Open ${name} — creates her session if it doesn't exist yet`}
       >
         ● {state === "opening" ? "opening…" : name}
       </button>
@@ -73,7 +69,7 @@ export function PearlButton({ actionsEnabled, name = "Pearl" }) {
         type="button"
         className="btn pearl-refresh"
         onClick={refresh}
-        disabled={!actionsEnabled || busy}
+        disabled={busy}
         title={`Restart ${name} — she'll reload SOUL.md and the briefing, losing her current conversation`}
       >
         {state === "refreshing" ? "restarting…" : "↻"}

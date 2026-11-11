@@ -15,7 +15,6 @@ import {
 } from "./lib/jira.js";
 import { isPrUrl, searchMyPrs, viewPr } from "./lib/pr.js";
 import { adfToPlainText } from "./lib/adf.js";
-import { isExecutionEnabled } from "./lib/dashboard-actions.js";
 import {
   closeJob,
   findRunningJobForTicket,
@@ -34,7 +33,10 @@ import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
 // are deployment-specific, same spirit as JIRA_DOMAIN etc.
-const TODO_PROJECT_KEY = process.env.TODO_PROJECT_KEY || "JT";
+// No default — unlike ISSUE_TYPE/LABEL, a project key is specific to one
+// person's Jira instance, so guessing one would create issues in a project
+// the operator never chose.
+const TODO_PROJECT_KEY = process.env.TODO_PROJECT_KEY || "";
 const TODO_ISSUE_TYPE = process.env.TODO_ISSUE_TYPE || "Task";
 const TODO_LABEL = process.env.TODO_LABEL || "Todo";
 
@@ -124,7 +126,6 @@ app.get("/api/tickets", async () => {
   return {
     jiraBaseUrl: JIRA_DOMAIN ? `https://${JIRA_DOMAIN}/browse` : null,
     tickets,
-    actionsEnabled: isExecutionEnabled(),
     pearlName: PEARL_NAME,
   };
 });
@@ -162,7 +163,6 @@ async function getTicketDetail(key) {
 app.get("/api/tickets/:key", async (request) => getTicketDetail(request.params.key));
 
 app.get("/api/jobs", async () => ({
-  actionsEnabled: isExecutionEnabled(),
   // startedAt is null for a session adopted with no meta file on disk —
   // sorts last (oldest) rather than crashing the whole list on a bare
   // `.localeCompare` call against null.
@@ -207,22 +207,12 @@ app.post("/api/jobs/:id/open-terminal", async (request, reply) => {
 });
 
 // Closes a session: kills its tmux session if still live, then drops it
-// from the job list entirely. Gated the same as dispatch when there's an
-// actual live agent to kill; dismissing an already-finished card needs no
-// such gate — it's not an action against anything, just tidying the list.
+// from the job list entirely.
 app.post("/api/jobs/:id/close", async (request, reply) => {
   const job = getJob(request.params.id);
   if (!job) {
     reply.code(404);
     return { ok: false, error: "Unknown job" };
-  }
-  const isLive = job.status === "running" || job.status === "needs_input";
-  if (isLive && !isExecutionEnabled()) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: "Closing a running session requires DASHBOARD_ALLOW_ACTIONS=true",
-    };
   }
   const result = closeJob(request.params.id);
   if (!result.ok) reply.code(400);
@@ -271,13 +261,6 @@ app.post("/api/prs/announce", async (request, reply) => {
     reply.code(400);
     return { ok: false, error: "url must be a GitHub PR URL (https://github.com/owner/repo/pull/N)" };
   }
-  if (!isExecutionEnabled()) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: "Posting is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.",
-    };
-  }
   if (!isAnnounceConfigured()) {
     reply.code(400);
     return { ok: false, error: "SLACK_WORKFLOW_URL_PR_ANNOUNCE is not set" };
@@ -325,6 +308,10 @@ app.get("/api/todos", async () => {
 });
 
 app.post("/api/todos", async (request, reply) => {
+  if (!TODO_PROJECT_KEY) {
+    reply.code(400);
+    return { ok: false, error: "TODO_PROJECT_KEY is not set. Set it in .env to the Jira project key todos should be created in." };
+  }
   const { summary, description, dueDate } = request.body || {};
   if (!summary) {
     reply.code(400);
@@ -373,14 +360,6 @@ app.post("/api/dispatch", async (request, reply) => {
   if (mode && mode !== "headless" && mode !== "interactive") {
     reply.code(400);
     return { ok: false, error: 'mode must be "headless" or "interactive"' };
-  }
-
-  if (!isExecutionEnabled()) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: "Dispatch is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.",
-    };
   }
 
   const type = context?.type || "none";
@@ -511,14 +490,6 @@ app.post("/api/dispatch", async (request, reply) => {
 // first call) and opens a real iTerm2 window attached to it. No chat UI —
 // the human drives her directly in the terminal from here on.
 app.post("/api/pearl/open", async (request, reply) => {
-  if (!isExecutionEnabled()) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: "Pearl is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.",
-    };
-  }
-
   const result = openPearl({
     cwd: REPO_ROOT,
     repoRoot: REPO_ROOT,
@@ -533,14 +504,6 @@ app.post("/api/pearl/open", async (request, reply) => {
 // tmux session by hand. Confirmation that this discards her current
 // conversation happens in the UI; this route just does the kill-then-spawn.
 app.post("/api/pearl/refresh", async (request, reply) => {
-  if (!isExecutionEnabled()) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: `${PEARL_NAME} is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.`,
-    };
-  }
-
   const result = refreshPearl({
     cwd: REPO_ROOT,
     repoRoot: REPO_ROOT,

@@ -22,8 +22,7 @@
 // Commands the dashboard will spawn, keyed by the classifier's nextAction.
 //
 // `args` are appended after the ticket key. The cleanup commands take --yes
-// because a headless run has no one to answer the prompt — which is exactly why
-// running them requires an explicit opt-in (see isExecutionEnabled).
+// because a headless run has no one to answer the prompt.
 const RUNNABLE_ACTIONS = Object.freeze({
   "cleanup-terminal": {
     command: "cleanup-main",
@@ -71,13 +70,6 @@ const SUGGESTED_COMMANDS = Object.freeze({
   idle: null,
 });
 
-// Execution is opt-in via env, not a UI toggle: a toggle in a browser tab is
-// too easy to leave on, and the blast radius (deleted branches, Jira
-// transitions) outlives the tab.
-export function isExecutionEnabled(env = process.env) {
-  return env.DASHBOARD_ALLOW_ACTIONS === "true";
-}
-
 // The action a ticket offers, if any. Pure: returns a descriptor, never spawns.
 //
 // Returns null when there is nothing to offer, so callers can render
@@ -94,8 +86,8 @@ export function resolveAction(ticket) {
       label: runnable.label,
       effects: runnable.effects,
       runnable: true,
-      // What a human would type. Always provided, even for runnable actions —
-      // the copy-paste path stays available when execution is disabled.
+      // What a human would type — always provided alongside the runnable
+      // action, so the copy-paste path stays available too.
       slashCommand: formatSlashCommand(runnable.command, ticket.key, []),
     };
   }
@@ -124,15 +116,7 @@ export function formatSlashCommand(command, ticketKey, args = []) {
 // action name in the request: the dashboard polls every 10s, so a button can be
 // clicked against a stale render. Re-deriving here means a ticket that has since
 // moved on can't be cleaned up twice.
-export function validateActionRequest({ ticket, action, env } = {}) {
-  if (!isExecutionEnabled(env)) {
-    return {
-      ok: false,
-      error:
-        "Action execution is disabled. Set DASHBOARD_ALLOW_ACTIONS=true to enable it.",
-    };
-  }
-
+export function validateActionRequest({ ticket, action } = {}) {
   if (!ticket) {
     return { ok: false, error: "Unknown ticket" };
   }

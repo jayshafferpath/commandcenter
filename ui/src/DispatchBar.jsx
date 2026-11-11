@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 
-export function DispatchBar({ onDispatch, actionsEnabled, error }) {
+export function DispatchBar({ onDispatch, error }) {
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
   const [brain, setBrain] = useState(false);
@@ -27,11 +27,7 @@ export function DispatchBar({ onDispatch, actionsEnabled, error }) {
       <div className="dispatch-bar-row">
         <textarea
           className="dispatch-input"
-          placeholder={
-            actionsEnabled
-              ? "Dispatch a general agent…"
-              : "Dispatch is disabled (set DASHBOARD_ALLOW_ACTIONS=true)"
-          }
+          placeholder="Dispatch a general agent…"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => {
@@ -40,13 +36,13 @@ export function DispatchBar({ onDispatch, actionsEnabled, error }) {
               submit(e);
             }
           }}
-          disabled={!actionsEnabled || sending}
+          disabled={sending}
           rows={2}
         />
         <button
           type="submit"
           className="btn btn--primary"
-          disabled={!actionsEnabled || sending || !prompt.trim()}
+          disabled={sending || !prompt.trim()}
         >
           {sending ? "…" : "Dispatch"}
         </button>
@@ -56,7 +52,7 @@ export function DispatchBar({ onDispatch, actionsEnabled, error }) {
           type="checkbox"
           checked={brain}
           onChange={(e) => setBrain(e.target.checked)}
-          disabled={!actionsEnabled || sending}
+          disabled={sending}
         />
         Brain view — give it a live canvas to think out loud on
       </label>
