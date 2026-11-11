@@ -13,7 +13,7 @@ away in a real terminal.
 ./install.sh --all      # + everything below
 ./install.sh --mcp      # + Atlassian MCP registration
 ./install.sh --ptt      # + push-to-talk setup
-./install.sh --memory   # + Pearl's persistent memory (Basic Memory, ~0.5 GB)
+./install.sh --memory   # + the supervisor's persistent memory (Basic Memory, ~0.5 GB)
 ```
 
 Core (always runs): installs dependencies, creates `.env` from the
@@ -24,13 +24,13 @@ the PR column and push-to-talk voice input, respectively).
 
 Optional, off by default — pick what you actually use:
 
-- `--mcp` registers the Atlassian MCP server with Claude Code (Pearl's Jira
-  work goes through it)
-- `--ptt` sets up push-to-talk voice input for Pearl (see Pearl's voice,
-  below)
-- `--memory` installs Basic Memory with `uv` for Pearl's persistent memory,
-  installing `uv` itself with Homebrew first if it isn't usable (see Pearl's
-  memory, below)
+- `--mcp` registers the Atlassian MCP server with Claude Code (the
+  supervisor's Jira work goes through it)
+- `--ptt` sets up push-to-talk voice input for the supervisor agent (see
+  Supervisor voice, below)
+- `--memory` installs Basic Memory with `uv` for the supervisor's persistent
+  memory, installing `uv` itself with Homebrew first if it isn't usable (see
+  Supervisor memory, below)
 
 `install.sh` defaults `DEV_ROOT` to commandcenter's own parent directory
 (it's always a repo under your `DEV_ROOT`) — adjust it if that's wrong.
@@ -56,9 +56,9 @@ Starts the API (port 3789) and the Vite dev server (port 5173). Open
 ```
 api/
   server.js         Fastify REST API — tickets, todos, PRs, jobs, dispatch
-  pearl.js          The supervisor agent: ensures her tmux session exists,
-                     opens a real terminal into her
-  pearl-speak.js    Pearl's on-demand speech and push-to-talk input
+  pearl.js          The supervisor agent: ensures its tmux session exists,
+                     opens a real terminal into it
+  pearl-speak.js    The supervisor's on-demand speech and push-to-talk input
   run-command.js    Spawns dispatched agents in their own tmux sessions,
                      tracks them as jobs
   brain.js          Per-job Brain View canvas storage
@@ -67,18 +67,19 @@ api/
 commands/           Claude Code commands symlinked into ~/.claude/commands
                      by install.sh: /automodel, plus one /cc-* skill per
                      dashboard capability
-hammerspoon/        Push-to-talk hotkey glue for Pearl
+hammerspoon/        Push-to-talk hotkey glue for the supervisor agent
 ui/                 React dashboard (Vite)
 tests/              Vitest suite for api/ and ui/ pure logic
 ```
 
-Dispatched agents and Pearl both run as real `tmux` sessions so you can
-attach to and drive them directly from a terminal, not just watch a log —
-and opening that terminal window uses `osascript` to drive iTerm2. Both are
-macOS-only requirements.
+Dispatched agents and the supervisor agent both run as real `tmux` sessions
+so you can attach to and drive them directly from a terminal, not just
+watch a log — and opening that terminal window uses `osascript` to drive
+iTerm2. Both are macOS-only requirements.
 
-Write actions (dispatching an agent, running Pearl, ticket cleanup/promote)
-always run — there's no env gate or UI toggle to disable them.
+Write actions (dispatching an agent, running the supervisor agent, ticket
+cleanup/promote) always run — there's no env gate or UI toggle to disable
+them.
 
 ## Dispatch
 
@@ -92,7 +93,7 @@ running job per ticket; a second dispatch returns 409.
 Every dispatched prompt starts with `/automodel`
 (`commands/automodel.md`), so the agent picks haiku, sonnet, or opus for
 the task before starting it, and ends with an instruction to report back to
-Pearl via `SendMessage`.
+the supervisor agent via `SendMessage`.
 
 ## Brain View
 
@@ -108,43 +109,48 @@ its thinking — the common case — doesn't surface one.
 
 ## Skills
 
-How Pearl and dispatched agents use each dashboard capability lives in one
-skill per capability, in `commands/`, loaded only when needed:
+How the supervisor agent and dispatched agents use each dashboard capability
+lives in one skill per capability, in `commands/`, loaded only when needed:
 
 | Skill | Used by | Covers |
 |---|---|---|
-| `/cc-dispatch` | Pearl | Starting, tracking, and closing agent sessions |
-| `/cc-tickets` | Pearl | Reading the user's tickets; changing them through `api/lib/jira.js` |
-| `/cc-todos` | Pearl | Listing, adding, and completing todos |
-| `/cc-prs` | Pearl | Listing open PRs; posting one to Slack |
-| `/cc-memory` | Pearl | Searching and saving her memory |
+| `/cc-dispatch` | Supervisor agent | Starting, tracking, and closing agent sessions |
+| `/cc-tickets` | Supervisor agent | Reading the user's tickets; changing them through `api/lib/jira.js` |
+| `/cc-todos` | Supervisor agent | Listing, adding, and completing todos |
+| `/cc-prs` | Supervisor agent | Listing open PRs; posting one to Slack |
+| `/cc-memory` | Supervisor agent | Searching and saving its memory |
 | `/cc-brain-view` | Dispatched agents | Using the Brain View canvas |
-| `/cc-report` | Dispatched agents | Reporting back to Pearl when done |
+| `/cc-report` | Dispatched agents | Reporting back to the supervisor agent when done |
 
-Pearl's briefing and each dispatched prompt carry a pointer to the right
-skills, plus the few rules that must hold even if a skill never loads.
+The supervisor's briefing and each dispatched prompt carry a pointer to the
+right skills, plus the few rules that must hold even if a skill never loads.
 Run `./install.sh` after adding a skill so it gets symlinked.
 
 ## SOUL.md
 
-Who Pearl is and how you want her to work, kept separate from the
-mechanical API briefing (`api/pearl.js`) so personality/preferences don't
-require editing code. Each install has its own: `install.sh` copies the
-neutral `SOUL.example.md` to `SOUL.md` the first time, and `SOUL.md` is
-gitignored, so your edits stay yours. Edit it from the dashboard's Pearl
-tab, or directly — it's read fresh every time she spins up. The ↻ button next to her name
-restarts her session so edits take effect, discarding her current
-conversation.
+Who the supervisor agent is and how you want it to work, kept separate from
+the mechanical API briefing (`api/pearl.js`) so personality/preferences
+don't require editing code. Each install has its own: `install.sh` copies
+the neutral `SOUL.example.md` to `SOUL.md` the first time, and `SOUL.md` is
+gitignored, so your edits stay yours. Edit it from the dashboard's
+supervisor tab, or directly — it's read fresh every time it spins up. The ↻
+button next to its name restarts its session so edits take effect,
+discarding its current conversation.
 
-Pearl runs pinned to Opus in `auto` permission mode, named `PEARL_NAME` so
-dispatched agents can reach her with `SendMessage`.
+The supervisor agent runs pinned to Opus in `auto` permission mode. Its
+name comes from `PEARL_NAME` in `.env` (default `Pearl`) and drives both
+its tmux session — `ccenter-<slugified-name>`, e.g. `ccenter-pearl` by
+default — and the `SendMessage({to: PEARL_NAME})` address dispatched agents
+use to reach it. Hammerspoon launches `pearl-speak.js` directly with its
+own minimal environment, so it (and `server.js`) load `.env` explicitly
+rather than relying on it being inherited.
 
-## Pearl's memory
+## Supervisor memory
 
-With `./install.sh --memory`, Pearl gets persistent memory that survives
-restarts: [Basic Memory](https://github.com/basicmachines-co/basic-memory),
+With `./install.sh --memory`, the supervisor agent gets persistent memory
+that survives restarts: [Basic Memory](https://github.com/basicmachines-co/basic-memory),
 which the API drives through its CLI (`api/lib/pearl-memory.js`) and exposes
-as routes she calls like the rest of the dashboard:
+as routes it calls like the rest of the dashboard:
 
 - `GET /api/memory/search?q=<question>&limit=<1-25>` — ranked notes
 - `GET /api/memory/note?id=<permalink>` — one full note
@@ -152,7 +158,7 @@ as routes she calls like the rest of the dashboard:
   a title that already exists returns 409 unless `overwrite` is true
 
 It isn't an MCP server because the org's managed MCP policy blocks servers
-that aren't on its allowlist. She saves deliberately — decisions, standing
+that aren't on its allowlist. It saves deliberately — decisions, standing
 preferences, outcomes worth knowing later — and searches before answering
 anything that depends on earlier context. Saves take about 3 seconds and run
 one at a time.
@@ -162,26 +168,27 @@ Everything stays on this machine. Memories are Markdown files under
 embedded locally with FastEmbed (`bge-small-en-v1.5`, downloaded once). The
 CLI runs with a fixed environment, not the API's own: the local embedding
 provider is pinned, `OPENAI_API_KEY` is blank, and the API's Jira
-credentials never reach it. She's told never to save credentials or PHI.
+credentials never reach it. It's told never to save credentials or PHI.
 
-To see or fix what she remembers, open the notes in any editor. If
-basic-memory isn't installed, Pearl runs without memory and her briefing
-doesn't mention it. Restart her (↻) after installing.
+To see or fix what it remembers, open the notes in any editor. If
+basic-memory isn't installed, the supervisor agent runs without memory and
+its briefing doesn't mention it. Restart it (↻) after installing.
 
 Optional env: `PEARL_MEMORY_BIN` when `uv` installs tools somewhere other
 than `~/.local/bin`.
 
-## Pearl's voice
+## Supervisor voice
 
-A Stop hook, scoped to Pearl's session only, caches a condensed version of
-each reply. `api/pearl-speak.js` speaks it on demand (`say`), stops it
-(`hush`), and handles voice input: `ask "<text>"` from any dictation tool,
-or the `preflight`/`voice` push-to-talk pair driven by Superwhisper's CLI
-through `hammerspoon/pearl-ptt.lua` (held Insert key). `./install.sh --ptt`
-auto-generates `hammerspoon/pearl-ptt.local.lua` (gitignored) with the
-machine-specific paths this needs and wires it into `~/.hammerspoon/init.lua`
-idempotently. Superwhisper must still be set up with a local-only mode by
-hand; see `.plans/push-to-talk-wispr.md` for why and how.
+A Stop hook, scoped to the supervisor's session only, caches a condensed
+version of each reply. `api/pearl-speak.js` speaks it on demand (`say`),
+stops it (`hush`), and handles voice input: `ask "<text>"` from any
+dictation tool, or the `preflight`/`voice` push-to-talk pair driven by
+Superwhisper's CLI through `hammerspoon/pearl-ptt.lua` (held Insert key).
+`./install.sh --ptt` auto-generates `hammerspoon/pearl-ptt.local.lua`
+(gitignored) with the machine-specific paths this needs and wires it into
+`~/.hammerspoon/init.lua` idempotently. Superwhisper must still be set up
+with a local-only mode by hand; see `.plans/push-to-talk-wispr.md` for why
+and how.
 
 If your Spoken Content voice (System Settings → Accessibility → Spoken
 Content) is a Personal Voice or one of Siri's "natural" voices, `say` can't
@@ -198,9 +205,10 @@ the Personal Voice fine. So when iTerm2 is running, `pearl-speak.js` relays
 flashes onto the display — instead of running it as a direct child of its
 own (tmux-backed) process; the window closes itself once `say` finishes (or
 is interrupted via `hush`), and any window orphaned by a crash gets swept up
-automatically the next time Pearl speaks. If iTerm2 isn't running, or the
-relay fails for any reason, `pearl-speak.js` falls back to the old direct
-`say` spawn — not Personal-Voice-capable, but it still speaks.
+automatically the next time the supervisor agent speaks. If iTerm2 isn't
+running, or the relay fails for any reason, `pearl-speak.js` falls back to
+the old direct `say` spawn — not Personal-Voice-capable, but it still
+speaks.
 
 Optional env: `PEARL_VOICE`, `PEARL_SPEECH_RATE`, `PEARL_SPEECH_VOLUME`,
 `PEARL_SPEECH_TONE`, `PEARL_SUPERWHISPER_BIN`, `PEARL_SUPERWHISPER_MODE`,
@@ -211,7 +219,7 @@ Optional env: `PEARL_VOICE`, `PEARL_SPEECH_RATE`, `PEARL_SPEECH_VOLUME`,
 Set `SLACK_WORKFLOW_URL_PR_ANNOUNCE` to a Slack Workflow Builder trigger URL
 (`hooks.slack.com/triggers/...`) to post PRs to a Slack channel on demand.
 Unset, the feature is off. Nothing posts automatically: each PR card gets a
-**post** button, and Pearl can post one when asked
+**post** button, and the supervisor agent can post one when asked
 (`POST /api/prs/announce` with `{ "url": "<PR URL>" }`). It sends a flat JSON
 payload — the Slack workflow owns the channel and the message formatting.
 The existing workflow declares a single `text` input; a workflow that wants
