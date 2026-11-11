@@ -46,19 +46,48 @@ reason, and a date when timing matters. Give it a short, specific title.
 
 ### Update instead of duplicating
 
-- A title that already exists returns 409. To update, POST the same title
-  with `"overwrite": true`, carrying forward whatever in the old note is
-  still true. Overwrite replaces the whole note.
+- A title that already exists returns 409 from `POST /api/memory`. To
+  update by title, POST it again with `"overwrite": true`, carrying forward
+  whatever in the old note is still true.
+- If you already have a note's permalink (from search, list, or a prior
+  save), update it directly instead:
+
+  ```bash
+  curl -s -X PUT "$API/api/memory/note?id=main/pearl/headless-dispatch" \
+    -H 'Content-Type: application/json' \
+    -d '{"content": "The user prefers interactive mode for dispatched agents: headless runs exit silently on permission prompts. Confirmed again 2026-11-11."}'
+  ```
+
+  Either way, overwrite replaces the whole note — carry forward what's
+  still true.
 - A save's `similarNotes` lists near-duplicates. When one turns up, merge
   into it instead of keeping both.
 
-Saves take a few seconds and run one at a time.
+Saves and updates take a few seconds and run one at a time.
+
+## List
+
+```bash
+curl -s "$API/api/memory/notes?page=1&limit=20"
+```
+
+Returns every note's `{title, permalink, updatedAt}`, oldest-API-call-bound
+and paginated: `{notes, page, limit, total, hasMore}`. Use it to browse or
+to find a permalink when search doesn't turn one up.
+
+## Delete
+
+```bash
+curl -s -X DELETE "$API/api/memory/note?id=main/pearl/headless-dispatch"
+```
+
+**Confirm with the user before deleting a note** — it can't be undone.
+Deleting an unknown permalink returns 404.
 
 ## Errors
 
 - 503 means memory isn't installed (`./install.sh --memory`). Carry on
   without it, and mention it once if the user asked you to remember something.
 - 502 means the memory tool failed. The `error` says how.
-
-To delete or hand-fix a note, the user edits the files under
-`~/.commandcenter/memory/notes/pearl/`. There's no delete route.
+- 404 on update or delete means that permalink doesn't exist — double-check
+  it with search or list.

@@ -38,6 +38,10 @@ export class MemoryError extends Error {}
 // the CLI's own message points at MCP tools she doesn't have.
 export class MemoryExistsError extends MemoryError {}
 
+// Its own type so the route can answer 404; raised by the CLI's NOT_FOUND
+// refusal on both `delete` and `read` of an unknown identifier.
+export class MemoryNotFoundError extends MemoryError {}
+
 // A function, not a constant, so tests can mock os.homedir() — same reason
 // as brain.js's brainRoot().
 export function memoryRoot() {
@@ -93,10 +97,19 @@ export function readArgs({ identifier }) {
   return ["tool", "read", ...TOOL_FLAGS, identifier];
 }
 
-// Writes go one at a time: each CLI call is its own process against the same
-// SQLite index, and two concurrent saves would otherwise race on it.
+export function listArgs({ page, limit }) {
+  return ["tool", "list", MEMORY_FOLDER, "--page", String(page), "--page-size", String(limit), ...TOOL_FLAGS];
+}
+
+export function deleteArgs({ identifier }) {
+  return ["tool", "delete", "--identifier", identifier, ...TOOL_FLAGS];
+}
+
+// Writes and deletes go one at a time: each CLI call is its own process
+// against the same SQLite index, and two concurrent mutations would
+// otherwise race on it.
 export function createMemory({ bin, root = memoryRoot(), env = process.env, execFileAsync = defaultExecFile }) {
-  let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
 
   async function run(args) {
     mkdirSync(root, { recursive: true });
@@ -115,6 +128,9 @@ export function createMemory({ bin, root = memoryRoot(), env = process.env, exec
       if (detail.includes('"ALREADY_EXISTS"')) {
         throw new MemoryExistsError("A note with this title already exists. Save again with overwrite: true to replace it.");
       }
+      if (detail.includes('"NOT_FOUND"')) {
+        throw new MemoryNotFoundError("No note found for that permalink.");
+      }
       throw new MemoryError(`basic-memory ${args[1]} failed: ${detail}`);
     }
     try {
@@ -122,6 +138,14 @@ export function createMemory({ bin, root = memoryRoot(), env = process.env, exec
     } catch {
       throw new MemoryError(`basic-memory ${args[1]} returned non-JSON output`);
     }
+  }
+
+  // A failed mutation mustn't wedge the queue for every mutation after it.
+  function serialize(task) {
+    const result = mutationChain.then(task);
+    // reliability-allow err-no-swallow: the caller still receives `result`'s rejection; only the queue's copy is detached.
+    mutationChain = result.catch(() => {});
+    return result;
   }
 
   return {
@@ -141,8 +165,16 @@ export function createMemory({ bin, root = memoryRoot(), env = process.env, exec
       return { title: note.title, permalink: note.permalink, content: note.content };
     },
 
+    async list({ page, limit }) {
+      const result = await run(listArgs({ page, limit }));
+      const notes = (result.nodes ?? [])
+        .filter((node) => node.type === "file")
+        .map((node) => ({ title: node.title, permalink: node.permalink, updatedAt: node.updated_at }));
+      return { notes, page: result.page, limit: result.page_size, total: result.total, hasMore: result.has_more };
+    },
+
     write({ title, content, overwrite = false }) {
-      const result = writeChain.then(async () => {
+      return serialize(async () => {
         const saved = await run(writeArgs({ title, content, overwrite }));
         return {
           action: saved.action,
@@ -151,10 +183,25 @@ export function createMemory({ bin, root = memoryRoot(), env = process.env, exec
           similarNotes: saved.similar_notes ?? [],
         };
       });
-      // A failed write mustn't wedge the queue for every write after it.
-      // reliability-allow err-no-swallow: the caller still receives `result`'s rejection; only the queue's copy is detached.
-      writeChain = result.catch(() => {});
-      return result;
+    },
+
+    // The CLI's write only addresses a note by a literal file path or by
+    // title + directory, never by permalink — so update resolves the
+    // permalink to its title with a read, then replaces it the same way
+    // the create-with-overwrite path does.
+    update({ identifier, content }) {
+      return serialize(async () => {
+        const existing = await run(readArgs({ identifier }));
+        const saved = await run(writeArgs({ title: existing.title, content, overwrite: true }));
+        return { action: saved.action, title: saved.title, permalink: saved.permalink };
+      });
+    },
+
+    remove({ identifier }) {
+      return serialize(async () => {
+        const result = await run(deleteArgs({ identifier }));
+        return { action: result.action ?? "deleted", title: result.title, filePath: result.file_path };
+      });
     },
   };
 }
