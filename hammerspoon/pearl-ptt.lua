@@ -62,12 +62,12 @@ local PEARL_SUPERWHISPER_MODE = overrides.PEARL_SUPERWHISPER_MODE or "default"
 
 local PEARL_SPEAK = COMMANDCENTER_ROOT .. "/api/pearl-speak.js"
 
-local function runPearlSpeak(args)
+local function runPearlSpeak(args, onComplete)
   local fullArgs = { PEARL_SPEAK }
   for _, a in ipairs(args) do
     table.insert(fullArgs, a)
   end
-  local task = hs.task.new(NODE_BIN, nil, fullArgs)
+  local task = hs.task.new(NODE_BIN, onComplete, fullArgs)
   task:setEnvironment({
     PEARL_SUPERWHISPER_BIN = SUPERWHISPER_BIN,
     PEARL_SUPERWHISPER_MODE = PEARL_SUPERWHISPER_MODE,
@@ -82,6 +82,94 @@ local function runPearlSpeak(args)
   return task
 end
 
+-- Status pill (bottom-center, dark translucent, above other windows) so
+-- there's visual feedback for a voice action that has no window of its
+-- own. Pure UI: never gates `preflight`/`start`/`stop`/`voice`, and must
+-- never be left on screen if any of them misbehave.
+local overlayWidth, overlayHeight = 190, 40
+local overlayCanvas = nil
+local pulseTimer, dotsTimer, safetyTimer = nil, nil, nil
+
+local function buildOverlay()
+  local screenFrame = hs.screen.mainScreen():frame()
+  local canvas = hs.canvas.new({
+    x = screenFrame.x + (screenFrame.w - overlayWidth) / 2,
+    y = screenFrame.y + screenFrame.h - overlayHeight - 56,
+    w = overlayWidth,
+    h = overlayHeight,
+  })
+  -- No mouseCallback is ever set on this canvas — per hs.canvas docs that's
+  -- what makes it ignore mouse events entirely (click-through). clickActivating
+  -- is just a second layer so a stray click can't steal focus either.
+  canvas:level(hs.canvas.windowLevels.overlay)
+  canvas:clickActivating(false)
+  canvas[1] = {
+    type = "rectangle",
+    action = "fill",
+    roundedRectRadii = { xRadius = overlayHeight / 2, yRadius = overlayHeight / 2 },
+    fillColor = { red = 0, green = 0, blue = 0, alpha = 0.72 },
+    frame = { x = 0, y = 0, w = overlayWidth, h = overlayHeight },
+  }
+  canvas[2] = {
+    type = "circle",
+    id = "dot",
+    action = "fill",
+    fillColor = { red = 0.95, green = 0.2, blue = 0.2, alpha = 1 },
+    center = { x = 22, y = overlayHeight / 2 },
+    radius = 5,
+  }
+  canvas[3] = {
+    type = "text",
+    id = "label",
+    text = "",
+    textColor = { white = 1, alpha = 0.95 },
+    textSize = 14,
+    textAlignment = "left",
+    frame = { x = 38, y = 10, w = overlayWidth - 48, h = overlayHeight - 20 },
+  }
+  return canvas
+end
+
+local function stopOverlayTimers()
+  if pulseTimer then pulseTimer:stop(); pulseTimer = nil end
+  if dotsTimer then dotsTimer:stop(); dotsTimer = nil end
+  if safetyTimer then safetyTimer:stop(); safetyTimer = nil end
+end
+
+local function hideOverlay()
+  stopOverlayTimers()
+  if overlayCanvas then overlayCanvas:hide() end
+end
+
+local function showListeningOverlay()
+  overlayCanvas = overlayCanvas or buildOverlay()
+  overlayCanvas["label"].text = "Listening…"
+  overlayCanvas["dot"].fillColor = { red = 0.95, green = 0.2, blue = 0.2, alpha = 1 }
+  overlayCanvas:show()
+  local lit = true
+  pulseTimer = hs.timer.doEvery(0.5, function()
+    lit = not lit
+    overlayCanvas["dot"].fillColor = { red = 0.95, green = 0.2, blue = 0.2, alpha = lit and 1 or 0.25 }
+  end)
+end
+
+local function showTranscribingOverlay()
+  -- Only follows a listening overlay that actually showed — if preflight
+  -- failed there was never one to hand off from, and nothing should appear.
+  if not overlayCanvas then return end
+  if pulseTimer then pulseTimer:stop(); pulseTimer = nil end
+  overlayCanvas["dot"].fillColor = { red = 0.95, green = 0.2, blue = 0.2, alpha = 0 }
+  local dotCount = 0
+  dotsTimer = hs.timer.doEvery(0.4, function()
+    dotCount = (dotCount + 1) % 4
+    overlayCanvas["label"].text = "Transcribing" .. string.rep(".", dotCount)
+  end)
+  -- `voice`'s own read-back poll is bounded to 10s; this is a backstop so a
+  -- stuck poll loop or a task callback that never fires can't leave the
+  -- pill on screen forever.
+  safetyTimer = hs.timer.doAfter(11, hideOverlay)
+end
+
 local function pressed()
   -- Synchronous on purpose: we need to know preflight passed before
   -- telling Superwhisper to start recording at all.
@@ -90,11 +178,13 @@ local function pressed()
   if preflightTask:terminationStatus() ~= 0 then return end
 
   hs.execute("'" .. SUPERWHISPER_BIN .. "' start")
+  showListeningOverlay()
 end
 
 local function released()
   hs.execute("'" .. SUPERWHISPER_BIN .. "' stop")
-  runPearlSpeak({ "voice" })
+  showTranscribingOverlay()
+  runPearlSpeak({ "voice" }, hideOverlay)
 end
 
 hs.hotkey.bind({}, "help", pressed, released)
