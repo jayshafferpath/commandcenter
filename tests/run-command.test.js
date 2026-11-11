@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serializeJob, __test__ } from "../api/run-command.js";
 
 const {
@@ -127,6 +127,50 @@ describe("needsInput", () => {
     const stale = "Do you want to proceed?\n❯ 1. Yes\n";
     const pane = stale + "x".repeat(3000) + "\nAll done, nothing pending.";
     expect(needsInput(pane)).toBe(false);
+  });
+});
+
+describe("syncJobsFromTmux", () => {
+  const originalPearlName = process.env.PEARL_NAME;
+
+  afterEach(() => {
+    if (originalPearlName === undefined) delete process.env.PEARL_NAME;
+    else process.env.PEARL_NAME = originalPearlName;
+    vi.doUnmock("node:child_process");
+    vi.resetModules();
+  });
+
+  // Loads a fresh copy of run-command.js (and, transitively, pearl-session.js)
+  // so PEARL_NAME is re-read, with tmux's session list stubbed rather than
+  // shelling out for real.
+  async function loadWithSessions(sessionNames) {
+    vi.doMock("node:child_process", () => ({
+      execFileSync: (cmd, args) => {
+        if (cmd === "tmux" && args[0] === "list-sessions") {
+          return sessionNames.join("\n");
+        }
+        throw new Error(`unexpected execFileSync call in test: ${cmd} ${args.join(" ")}`);
+      },
+    }));
+    vi.resetModules();
+    const mod = await import("../api/run-command.js");
+    return mod.__test__;
+  }
+
+  it("does not adopt the supervisor's own session under a non-default PEARL_NAME", async () => {
+    process.env.PEARL_NAME = "Jarvis";
+    const t = await loadWithSessions(["ccenter-jarvis", "ccenter-abc123"]);
+    t.syncJobsFromTmux();
+    expect(t.jobs.has("jarvis")).toBe(false);
+    expect(t.jobs.has("abc123")).toBe(true);
+  });
+
+  it("still skips the default ccenter-pearl session when PEARL_NAME is unset", async () => {
+    delete process.env.PEARL_NAME;
+    const t = await loadWithSessions(["ccenter-pearl", "ccenter-abc123"]);
+    t.syncJobsFromTmux();
+    expect(t.jobs.has("pearl")).toBe(false);
+    expect(t.jobs.has("abc123")).toBe(true);
   });
 });
 

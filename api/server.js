@@ -1,5 +1,4 @@
-import { loadEnv } from "./lib/env.js";
-loadEnv();
+import "./lib/load-env.js";
 
 import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";

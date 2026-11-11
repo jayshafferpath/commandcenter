@@ -24,6 +24,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hasBrainContent } from "./brain.js";
+import { SESSION as PEARL_SESSION } from "./lib/pearl-session.js";
 
 const MAX_LOG_CHARS = 100_000;
 const SESSION_PREFIX = "ccenter-";
@@ -159,8 +160,10 @@ function syncJobsFromTmux() {
     // Pearl's singleton session shares this naming convention but isn't a
     // per-dispatch job — she's a persistent supervisor (see pearl.js) and
     // would otherwise show up here forever stuck at "running" with a
-    // garbled prompt.
-    if (session === "ccenter-pearl") continue;
+    // garbled prompt. Compared against the computed SESSION (not the
+    // literal "ccenter-pearl") so a renamed supervisor (PEARL_NAME) is still
+    // recognized as itself instead of being adopted as a job.
+    if (session === PEARL_SESSION) continue;
     const id = idFromSessionName(session);
     if (jobs.has(id)) continue;
 
@@ -490,4 +493,5 @@ export const __test__ = {
   idFromSessionName,
   innerCommand,
   needsInput,
+  syncJobsFromTmux,
 };
