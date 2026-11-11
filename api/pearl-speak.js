@@ -137,7 +137,12 @@ export function hush() {
 function speak(text) {
   hush();
 
-  // Siri voices aren't addressable via `say -v`; omitting -v uses the system voice set in Spoken Content.
+  // Siri and Personal Voice voices aren't addressable via `say -v` — AVSpeechSynthesizer
+  // walls both off behind per-app authorization `say` was never granted, tmux or not
+  // (confirmed: `say` with no -v renders byte-identical fallback audio in and out of
+  // tmux). Omitting -v falls back to a legacy NSSpeechSynthesizer voice, not whichever
+  // of those the user picked in Spoken Content. Set PEARL_VOICE to a `say -v '?'` voice
+  // to get a specific, reliably-addressable one instead.
   const voice = process.env.PEARL_VOICE?.trim();
   const rate = process.env.PEARL_SPEECH_RATE?.trim() || "210";
   // `say` has no volume flag; the embedded [[volm]] command is the only knob.
