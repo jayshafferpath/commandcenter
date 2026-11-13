@@ -193,7 +193,13 @@ element. For each chunk:
      you pass to `code`. Fire this unconditionally, same as the `code` call
      above: if Pair Pal isn't installed or connected, this just 404s and
      has no visible effect — don't treat that as an error or skip the
-     `code --diff`/`--goto` call waiting on it.
+     `code --diff`/`--goto` call waiting on it. You don't hand Pair Pal
+     this review's id: it finds this walkthrough on its own (it polls for
+     the in-progress walkthrough matching the repo open in VS Code), so
+     the first move or two can 404 while it connects. Never write a
+     `.vscode/settings.json` or anything else into the repo to help it
+     along — that dirties the working tree, and the change agent's
+     `ADVANCE_ROUND` refuses a dirty tree.
    - Explain only that element, in a sentence or two, in your own words —
      don't paste the diff back at him. Speak it too, right after you post
      it, with the same text — this uses the generic voice capability every

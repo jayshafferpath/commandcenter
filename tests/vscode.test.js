@@ -26,6 +26,8 @@ const {
   clearCommand,
   connectVscode,
   getVscodeState,
+  isSameRepoPath,
+  matchWalkthroughForRepo,
   moveCommand,
   VscodeNotConnectedError,
   VscodeRepoMismatchError,
@@ -54,6 +56,10 @@ describe("connectVscode", () => {
     connectVscode("rev-1", "/repo");
     const state = connectVscode("rev-1", "/repo");
     expect(state.repo).toBe("/repo");
+  });
+
+  it("accepts the review's repo with a trailing slash, same as discovery does", () => {
+    expect(connectVscode("rev-1", "/repo/").repo).toBe("/repo/");
   });
 
   it("hard-rejects a workspace that doesn't match the review's own repo", () => {
@@ -149,6 +155,60 @@ describe("waitForCommand", () => {
 
   it("rejects when nothing has connected yet", async () => {
     await expect(waitForCommand("rev-1", { timeoutMs: 20 })).rejects.toThrow(VscodeNotConnectedError);
+  });
+});
+
+describe("matchWalkthroughForRepo", () => {
+  const makeReview = (overrides) => ({
+    id: "rev-1",
+    repo: "/repo",
+    state: "walkthrough_in_progress",
+    currentRound: 1,
+    ...overrides,
+  });
+
+  it("returns no match when no review is in progress for the repo", () => {
+    const reviews = [
+      makeReview({ id: "rev-1", state: "round_ready" }),
+      makeReview({ id: "rev-2", repo: "/other" }),
+    ];
+    expect(matchWalkthroughForRepo(reviews, "/repo")).toEqual({ match: null, ambiguous: [] });
+  });
+
+  it("returns no match for an empty review list", () => {
+    expect(matchWalkthroughForRepo([], "/repo")).toEqual({ match: null, ambiguous: [] });
+  });
+
+  it("returns the single in-progress walkthrough for the repo", () => {
+    const target = makeReview({ id: "rev-2" });
+    const reviews = [
+      makeReview({ id: "rev-1", state: "awaiting_change_job" }),
+      target,
+      makeReview({ id: "rev-3", repo: "/other" }),
+    ];
+    expect(matchWalkthroughForRepo(reviews, "/repo")).toEqual({ match: target, ambiguous: [] });
+  });
+
+  it("matches across a trailing slash on either side", () => {
+    const target = makeReview({ repo: "/repo/" });
+    expect(matchWalkthroughForRepo([target], "/repo").match).toBe(target);
+  });
+
+  it("picks none and reports every candidate when several match", () => {
+    const reviews = [makeReview({ id: "rev-1" }), makeReview({ id: "rev-2" })];
+    expect(matchWalkthroughForRepo(reviews, "/repo")).toEqual({ match: null, ambiguous: ["rev-1", "rev-2"] });
+  });
+});
+
+describe("isSameRepoPath", () => {
+  it("is false when either side is missing", () => {
+    expect(isSameRepoPath("", "/repo")).toBe(false);
+    expect(isSameRepoPath("/repo", undefined)).toBe(false);
+  });
+
+  it("does not treat a parent or sibling path as the same repo", () => {
+    expect(isSameRepoPath("/repo", "/repo-two")).toBe(false);
+    expect(isSameRepoPath("/repo/sub", "/repo")).toBe(false);
   });
 });
 

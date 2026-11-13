@@ -3,12 +3,14 @@
 // Agent, never anything that could move Jay's real cursor or steal focus.
 // See .plans/vscode-walkthrough-bridge.md Phase A.
 import * as vscode from "vscode";
-import { ackCommand, connectWorkspace, pollCommands } from "./src/api-client.js";
+import { ackCommand, connectWorkspace, discoverReview, pollCommands } from "./src/api-client.js";
 import { CARET_COLOR, SELECTION_COLOR, shouldShowPresence, toZeroBasedRange } from "./src/decorations.js";
+import { ambiguityKey, DISCOVERY_IDLE_MS, nextConnectionStep } from "./src/discovery.js";
 import { nextBackoffMs, shouldReveal } from "./src/followState.js";
 
 const FALLBACK_LABEL = "Command Center";
 
+let outputChannel;
 let statusBarItem;
 let caretDecorationType;
 let selectionDecorationType;
@@ -37,7 +39,10 @@ export function activate(context) {
   renderStatusBar();
   statusBarItem.show();
 
+  outputChannel = vscode.window.createOutputChannel("Pair Pal");
+
   context.subscriptions.push(
+    outputChannel,
     statusBarItem,
     caretDecorationType,
     selectionDecorationType,
@@ -69,15 +74,22 @@ function config() {
 
 async function startPolling(context) {
   const { apiUrl, sessionId } = config();
-  if (!sessionId) {
-    // Nothing to connect to yet — Phase A has no session-id handoff from a
-    // walkthrough job, so this is set by hand for smoke testing until that
-    // lands. No error shown: an uninstalled/unconfigured Pair Pal degrades
-    // silently, same failure mode as the extension not being installed.
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  polling = true;
+  context.subscriptions.push({ dispose: () => { polling = false; } });
+
+  if (sessionId) {
+    await runManualSession(apiUrl, sessionId, folder);
     return;
   }
+  if (!folder) return;
+  await runDiscovery(apiUrl, folder);
+}
 
-  const folder = vscode.workspace.workspaceFolders?.[0];
+// commandCenter.sessionId set by hand: an override for smoke testing or a
+// review discovery can't pick (several walkthroughs on one repo). Connects
+// once and never re-checks whether the review is still in progress.
+async function runManualSession(apiUrl, sessionId, folder) {
   try {
     await connectWorkspace(apiUrl, sessionId, folder?.uri.fsPath || "");
   } catch (err) {
@@ -85,24 +97,79 @@ async function startPolling(context) {
     return;
   }
 
-  polling = true;
-  context.subscriptions.push({ dispose: () => { polling = false; } });
-
   let attempt = 0;
   while (polling) {
     try {
-      const { pendingCommand } = await pollCommands(apiUrl, sessionId);
+      await pollOnce(apiUrl, sessionId, folder);
       attempt = 0;
-      if (pendingCommand && pendingCommand.id !== lastCommandId) {
-        await applyCommand(pendingCommand, folder);
-        lastCommandId = pendingCommand.id;
-        await ackCommand(apiUrl, sessionId, pendingCommand.id);
-      }
     } catch (err) {
       attempt += 1;
       await sleep(nextBackoffMs(attempt));
     }
   }
+}
+
+// Re-checks discovery before every long poll, so a walkthrough that ends
+// (round completed, review abandoned, session gone) disconnects within one
+// long-poll cycle. Nothing is ever written into the workspace to hand off
+// the review id: a .vscode/settings.json in the reviewed repo would dirty
+// its tree, and ADVANCE_ROUND refuses a dirty tree.
+async function runDiscovery(apiUrl, folder) {
+  const repo = folder.uri.fsPath;
+  let connectedId = null;
+  let lastAmbiguity = null;
+  let attempt = 0;
+  while (polling) {
+    try {
+      const discovery = await discoverReview(apiUrl, repo);
+
+      const ambiguity = ambiguityKey(discovery);
+      if (ambiguity && ambiguity !== lastAmbiguity) {
+        log(`Several walkthroughs in progress for ${repo} (${ambiguity}); connecting to none. Set commandCenter.sessionId to pick one.`);
+      }
+      lastAmbiguity = ambiguity;
+
+      const step = nextConnectionStep(connectedId, discovery);
+      if (step.disconnect) {
+        log(`Walkthrough for review ${connectedId} is no longer in progress; disconnecting.`);
+        disconnect();
+        connectedId = null;
+      }
+      if (step.connectTo) {
+        await connectWorkspace(apiUrl, step.connectTo, repo);
+        connectedId = step.connectTo;
+        log(`Connected to review ${connectedId}.`);
+      }
+
+      if (connectedId) {
+        await pollOnce(apiUrl, connectedId, folder);
+      } else {
+        await sleep(DISCOVERY_IDLE_MS);
+      }
+      attempt = 0;
+    } catch (err) {
+      attempt += 1;
+      await sleep(nextBackoffMs(attempt));
+    }
+  }
+}
+
+async function pollOnce(apiUrl, sessionId, folder) {
+  const { pendingCommand } = await pollCommands(apiUrl, sessionId);
+  if (pendingCommand && pendingCommand.id !== lastCommandId) {
+    await applyCommand(pendingCommand, folder);
+    lastCommandId = pendingCommand.id;
+    await ackCommand(apiUrl, sessionId, pendingCommand.id);
+  }
+}
+
+function disconnect() {
+  clearDecorations();
+  lastCommandId = null;
+}
+
+function log(message) {
+  outputChannel.appendLine(`[${new Date().toISOString()}] ${message}`);
 }
 
 async function applyCommand(command, folder) {

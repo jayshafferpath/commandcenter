@@ -22,6 +22,10 @@ async function request(apiUrl, path, options, timeoutMs = DEFAULT_TIMEOUT_MS) {
   return body;
 }
 
+export function discoverReview(apiUrl, repo) {
+  return request(apiUrl, `/api/vscode/discover?repo=${encodeURIComponent(repo)}`, { method: "GET" });
+}
+
 export function connectWorkspace(apiUrl, id, repo) {
   return request(apiUrl, `/api/vscode/${id}/connect`, {
     method: "POST",

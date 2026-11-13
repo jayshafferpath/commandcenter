@@ -363,8 +363,8 @@ else
   echo "     (or --all) when you want it"
 fi
 if [ "$WITH_VSCODE_EXT" = true ]; then
-  echo "  5. Pair Pal is installed — set commandCenter.sessionId in VS Code settings"
-  echo "     to try it (see vscode-extension/README.md for a manual smoke checklist)"
+  echo "  5. Pair Pal is installed — it connects to a walkthrough on its own when"
+  echo "     you have the reviewed repo open (see vscode-extension/README.md)"
 else
   echo "  5. Pair Pal (agent presence in VS Code) wasn't installed — re-run with"
   echo "     --vscode-ext when you want it (always explicit, never part of --all)"

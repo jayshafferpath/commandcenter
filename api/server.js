@@ -30,6 +30,7 @@ import {
   ackCommand,
   clearCommand,
   connectVscode,
+  matchWalkthroughForRepo,
   moveCommand,
   VscodeNotConnectedError,
   VscodeRepoMismatchError,
@@ -231,6 +232,30 @@ app.get("/api/jobs/:id/brain", async (request, reply) => {
 // already owns) — see .plans/vscode-walkthrough-bridge.md Phase A. 404s on
 // an unknown review (connect) or an id that's never connected (every other
 // route), the same way the job routes above 404 on an unknown job.
+
+// Polled by the extension (when commandCenter.sessionId isn't set) to find
+// which review to connect to: the single review whose walkthrough is in
+// progress for the workspace it has open. Several at once for one repo is
+// logged and answered as no match — see matchWalkthroughForRepo.
+app.get("/api/vscode/discover", async (request, reply) => {
+  const { repo } = request.query ?? {};
+  if (!repo) {
+    reply.code(400);
+    return { ok: false, error: "repo query param is required" };
+  }
+  const { match, ambiguous } = matchWalkthroughForRepo(listReviews(), repo);
+  if (ambiguous.length > 0) {
+    request.log.warn({ repo, reviewIds: ambiguous }, "Pair Pal discovery: multiple walkthroughs in progress for this repo, connecting to none");
+  }
+  if (!match) return { ok: true, match: null, ambiguous };
+  const job = findRunningJobForReview(match.id, "walkthrough");
+  return {
+    ok: true,
+    match: { reviewId: match.id, repo: match.repo, round: match.currentRound, jobId: job?.id ?? null },
+    ambiguous,
+  };
+});
+
 app.post("/api/vscode/:id/connect", async (request, reply) => {
   const { repo } = request.body ?? {};
   if (!repo) {

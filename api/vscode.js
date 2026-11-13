@@ -5,7 +5,7 @@
 //   ~/.commandcenter/review/<id>/vscode.json
 //
 // Phase A only (see .plans/vscode-walkthrough-bridge.md): connect, move,
-// clear, ack, and the long-poll command loop. jayState/commentsVersion are
+// clear, ack, the long-poll command loop, and walkthrough discovery. jayState/commentsVersion are
 // Phase B/C fields with no writer yet, so this file doesn't carry them —
 // adding empty placeholders now would just be dead shape to maintain.
 //
@@ -17,7 +17,8 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { STATES } from "./lib/review-fsm.js";
 import { getSession } from "./review.js";
 
 const COMMAND_LONG_POLL_TIMEOUT_MS = 25_000;
@@ -75,6 +76,32 @@ export function getVscodeState(id) {
   return readState(id);
 }
 
+// Discovery and connect must agree on what "the same repo" means, or the
+// extension could discover a review it then can't connect to. resolve()
+// only absorbs a trailing slash or `..` segment — no realpath, since a
+// symlinked checkout is a different workspace as far as VS Code is
+// concerned too.
+export function isSameRepoPath(a, b) {
+  if (!a || !b) return false;
+  return resolve(a) === resolve(b);
+}
+
+// How Pair Pal finds its review without anyone setting
+// commandCenter.sessionId by hand — and without writing anything into the
+// reviewed repo's working tree (a .vscode/settings.json there would dirty
+// it, and ADVANCE_ROUND refuses a dirty tree). Pure over the review list so
+// it's testable without the filesystem; server.js supplies listReviews().
+// More than one in-progress walkthrough for the same repo returns no match
+// rather than a guess: connecting to the wrong review would show one
+// agent's presence in a conversation with another.
+export function matchWalkthroughForRepo(reviews, repo) {
+  const matches = reviews.filter(
+    (review) => review.state === STATES.WALKTHROUGH_IN_PROGRESS && isSameRepoPath(review.repo, repo),
+  );
+  if (matches.length === 1) return { match: matches[0], ambiguous: [] };
+  return { match: null, ambiguous: matches.length > 1 ? matches.map((review) => review.id) : [] };
+}
+
 // Last-connect-wins, same as every other multi-window case this plan
 // accepts (see Multi-window handling) — a second `connect` for the same id
 // simply replaces the first, it doesn't error. Hard-rejects (not a silent
@@ -87,7 +114,7 @@ export function connectVscode(id, repo) {
   if (!session) {
     throw new VscodeUnknownReviewError(`No review session ${id} — start one before connecting Pair Pal`);
   }
-  if (repo !== session.repo) {
+  if (!isSameRepoPath(repo, session.repo)) {
     throw new VscodeRepoMismatchError(
       `Workspace "${repo}" does not match this review's repo "${session.repo}"`,
     );

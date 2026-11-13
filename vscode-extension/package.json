@@ -32,7 +32,7 @@
         "commandCenter.sessionId": {
           "type": "string",
           "default": "",
-          "description": "The review/walkthrough id to connect to. Set per-workspace once Command Center hands this out automatically; until then, set it by hand to smoke-test."
+          "description": "Optional override. Leave empty and Pair Pal finds the review whose walkthrough is in progress for this workspace automatically. Set it to force a specific review id (skips discovery)."
         }
       }
     }
