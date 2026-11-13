@@ -41,6 +41,10 @@
     "package": "vsce package --out pair-pal.vsix"
   },
   "devDependencies": {
-    "@vscode/vsce": "^3.0.0"
+    "@vscode/vsce": "^2.32.0"
+  },
+  "overrides": {
+    "https-proxy-agent": "^5.0.1",
+    "http-proxy-agent": "^5.0.0"
   }
 }
