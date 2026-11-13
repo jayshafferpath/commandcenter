@@ -181,6 +181,19 @@ element. For each chunk:
      Claude-specific — it requires the `code` shell command to be on PATH
      (if the command isn't found, say so plainly rather than silently
      skipping the open).
+
+     Alongside it — never instead of it — also tell Pair Pal (the VS Code
+     extension, if Jay has it installed) where you are, so its own
+     caret/selection decoration follows you without moving his real cursor:
+     ```bash
+     curl -s -X POST "$API/api/vscode/$ID/move" -H 'Content-Type: application/json' \
+       -d '{"file": "<chunk.file>", "startLine": <element's line>}'
+     ```
+     `file` is repo-relative (same as `chunk.file`), not the absolute path
+     you pass to `code`. Fire this unconditionally, same as the `code` call
+     above: if Pair Pal isn't installed or connected, this just 404s and
+     has no visible effect — don't treat that as an error or skip the
+     `code --diff`/`--goto` call waiting on it.
    - Explain only that element, in a sentence or two, in your own words —
      don't paste the diff back at him. Speak it too, right after you post
      it, with the same text — this uses the generic voice capability every
@@ -280,6 +293,14 @@ yourself:
   It must be `interactive`: the change agent stops to ask Jay before it
   pushes back on any comment. A 409 means a change agent for this review is
   already running; report its `jobId` instead of starting another.
+
+Either way, this walkthrough job is ending — clear Pair Pal's presence
+marker so it doesn't linger after the conversation moves on (same
+no-op-if-not-connected caveat as above, fire it unconditionally):
+
+```bash
+curl -s -X POST "$API/api/vscode/$ID/clear"
+```
 
 Tell Jay in one line what happened (approved and done, or the change agent
 is working — it will speak up if it needs him), then report to the

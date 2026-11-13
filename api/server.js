@@ -33,6 +33,7 @@ import {
   moveCommand,
   VscodeNotConnectedError,
   VscodeRepoMismatchError,
+  VscodeUnknownReviewError,
   waitForCommand,
 } from "./vscode.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
@@ -226,9 +227,10 @@ app.get("/api/jobs/:id/brain", async (request, reply) => {
 });
 
 // Pair Pal (vscode-extension/): the agent's own presence in Jay's editor,
-// one state file per review/walkthrough id — see
-// .plans/vscode-walkthrough-bridge.md Phase A. 404s on an unconnected id
-// the same way the job routes above 404 on an unknown job.
+// one state file per review id (same ~/.commandcenter/review/<id>/ review.js
+// already owns) — see .plans/vscode-walkthrough-bridge.md Phase A. 404s on
+// an unknown review (connect) or an id that's never connected (every other
+// route), the same way the job routes above 404 on an unknown job.
 app.post("/api/vscode/:id/connect", async (request, reply) => {
   const { repo } = request.body ?? {};
   if (!repo) {
@@ -241,6 +243,10 @@ app.post("/api/vscode/:id/connect", async (request, reply) => {
   } catch (err) {
     if (err instanceof VscodeRepoMismatchError) {
       reply.code(409);
+      return { ok: false, error: err.message };
+    }
+    if (err instanceof VscodeUnknownReviewError) {
+      reply.code(404);
       return { ok: false, error: err.message };
     }
     throw err;

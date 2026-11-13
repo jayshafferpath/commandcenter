@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let fakeHome;
+let fakeSession;
 
 // vscode.js resolves its root lazily via os.homedir(), same reasoning as
 // brain.test.js — a module-level constant would freeze before the mock ran.
@@ -11,6 +12,14 @@ vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal();
   return { ...actual, homedir: () => fakeHome };
 });
+
+// connectVscode validates against a review session (api/review.js) — faked
+// here rather than spinning up a real git repo (see review.test.js for
+// that), since this file's job is vscode.js's own state machine, not
+// review.js's startReview plumbing.
+vi.mock("../api/review.js", () => ({
+  getSession: (id) => (fakeSession && fakeSession.id === id ? fakeSession : null),
+}));
 
 const {
   ackCommand,
@@ -20,11 +29,13 @@ const {
   moveCommand,
   VscodeNotConnectedError,
   VscodeRepoMismatchError,
+  VscodeUnknownReviewError,
   waitForCommand,
 } = await import("../api/vscode.js");
 
 beforeEach(() => {
   fakeHome = mkdtempSync(join(tmpdir(), "vscode-test-"));
+  fakeSession = { id: "rev-1", repo: "/repo" };
 });
 
 afterEach(() => {
@@ -33,26 +44,25 @@ afterEach(() => {
 
 describe("connectVscode", () => {
   it("creates state with no pending command", () => {
-    const state = connectVscode("rev-1", "/Users/jay/dev/partner-service");
-    expect(state.repo).toBe("/Users/jay/dev/partner-service");
+    const state = connectVscode("rev-1", "/repo");
+    expect(state.repo).toBe("/repo");
     expect(state.pendingCommand).toBeNull();
     expect(state.connectedAt).toBe(state.lastSeenAt);
   });
 
   it("last-connect-wins: a second connect replaces the first", () => {
-    connectVscode("rev-1", "/repo/a");
-    const state = connectVscode("rev-1", "/repo/b");
-    expect(state.repo).toBe("/repo/b");
+    connectVscode("rev-1", "/repo");
+    const state = connectVscode("rev-1", "/repo");
+    expect(state.repo).toBe("/repo");
   });
 
-  it("hard-rejects a workspace that doesn't match the expected repo", () => {
-    expect(() => connectVscode("rev-1", "/wrong/repo", { expectedRepo: "/right/repo" })).toThrow(
-      VscodeRepoMismatchError,
-    );
+  it("hard-rejects a workspace that doesn't match the review's own repo", () => {
+    expect(() => connectVscode("rev-1", "/wrong/repo")).toThrow(VscodeRepoMismatchError);
   });
 
-  it("allows any repo when no expected repo is given", () => {
-    expect(() => connectVscode("rev-1", "/any/repo")).not.toThrow();
+  it("rejects connecting to an id with no review session at all", () => {
+    fakeSession = null;
+    expect(() => connectVscode("rev-1", "/repo")).toThrow(VscodeUnknownReviewError);
   });
 });
 

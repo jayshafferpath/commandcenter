@@ -9,16 +9,16 @@
 // Phase B/C fields with no writer yet, so this file doesn't carry them —
 // adding empty placeholders now would just be dead shape to maintain.
 //
-// There's no review.js yet to own a session registry (that's a sibling
-// in-flight plan, not merged), so connectVscode takes an optional
-// expectedRepo rather than looking one up itself — once a session registry
-// exists, its caller can pass session.repo through for the same hard-reject
-// behavior the first draft already specified.
+// The id is a review id (same ~/.commandcenter/review/<id>/ directory
+// review.js already owns); connectVscode hard-rejects a workspace that
+// doesn't match that review's own repo, per the plan's Multi-window and
+// wrong-workspace handling section.
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getSession } from "./review.js";
 
 const COMMAND_LONG_POLL_TIMEOUT_MS = 25_000;
 
@@ -38,6 +38,7 @@ export function vscodeStatePathFor(id) {
 
 export class VscodeNotConnectedError extends Error {}
 export class VscodeRepoMismatchError extends Error {}
+export class VscodeUnknownReviewError extends Error {}
 
 function readState(id) {
   const path = vscodeStatePathFor(id);
@@ -76,11 +77,19 @@ export function getVscodeState(id) {
 
 // Last-connect-wins, same as every other multi-window case this plan
 // accepts (see Multi-window handling) — a second `connect` for the same id
-// simply replaces the first, it doesn't error.
-export function connectVscode(id, repo, { expectedRepo } = {}) {
-  if (expectedRepo && repo !== expectedRepo) {
+// simply replaces the first, it doesn't error. Hard-rejects (not a silent
+// no-op) a workspace that doesn't match the review's own repo, and refuses
+// to connect at all for an id with no review session — Pair Pal is always
+// a second participant in a review that already exists, never the thing
+// that creates one.
+export function connectVscode(id, repo) {
+  const session = getSession(id);
+  if (!session) {
+    throw new VscodeUnknownReviewError(`No review session ${id} — start one before connecting Pair Pal`);
+  }
+  if (repo !== session.repo) {
     throw new VscodeRepoMismatchError(
-      `Workspace "${repo}" does not match this session's repo "${expectedRepo}"`,
+      `Workspace "${repo}" does not match this review's repo "${session.repo}"`,
     );
   }
   const now = new Date().toISOString();
