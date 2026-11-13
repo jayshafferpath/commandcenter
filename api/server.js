@@ -26,6 +26,15 @@ import {
 } from "./run-command.js";
 import { brainInstructions, canvasPathFor, ensureBrainDir, readBrain } from "./brain.js";
 import { openPearl, PEARL_NAME, readSoul, refreshPearl, writeSoul } from "./pearl.js";
+import {
+  ackCommand,
+  clearCommand,
+  connectVscode,
+  moveCommand,
+  VscodeNotConnectedError,
+  VscodeRepoMismatchError,
+  waitForCommand,
+} from "./vscode.js";
 import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
@@ -214,6 +223,99 @@ app.get("/api/jobs/:id/brain", async (request, reply) => {
     return { ok: false, error: "This job has no brain canvas" };
   }
   return { ok: true, ...brain };
+});
+
+// Pair Pal (vscode-extension/): the agent's own presence in Jay's editor,
+// one state file per review/walkthrough id — see
+// .plans/vscode-walkthrough-bridge.md Phase A. 404s on an unconnected id
+// the same way the job routes above 404 on an unknown job.
+app.post("/api/vscode/:id/connect", async (request, reply) => {
+  const { repo } = request.body ?? {};
+  if (!repo) {
+    reply.code(400);
+    return { ok: false, error: "repo is required" };
+  }
+  try {
+    const state = connectVscode(request.params.id, repo);
+    return { ok: true, connectedAt: state.connectedAt };
+  } catch (err) {
+    if (err instanceof VscodeRepoMismatchError) {
+      reply.code(409);
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
+});
+
+// Long poll: Fastify just holds the response open (see vscode.js's
+// waitForCommand) until a new move/clear lands or ~25s passes, then the
+// extension immediately reissues it — near-instant delivery without a
+// websocket.
+app.get("/api/vscode/:id/commands", async (request, reply) => {
+  try {
+    const state = await waitForCommand(request.params.id);
+    return { pendingCommand: state.pendingCommand };
+  } catch (err) {
+    if (err instanceof VscodeNotConnectedError) {
+      reply.code(404);
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
+});
+
+// Guarded by cmdId server-side (see ackCommand) so acking a command that's
+// already been superseded by a newer move/clear is a no-op, not an error.
+app.post("/api/vscode/:id/commands/:cmdId/ack", async (request, reply) => {
+  try {
+    const state = ackCommand(request.params.id, request.params.cmdId);
+    return { ok: true, pendingCommand: state.pendingCommand };
+  } catch (err) {
+    if (err instanceof VscodeNotConnectedError) {
+      reply.code(404);
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
+});
+
+// Replaces the old reveal/highlight verbs — "jump to this element" and
+// "point at this block" are the same action. label defaults to the
+// session's agent name rather than a generic "Command Center" tag.
+app.post("/api/vscode/:id/move", async (request, reply) => {
+  const { file, startLine } = request.body ?? {};
+  if (!file || !startLine) {
+    reply.code(400);
+    return { ok: false, error: "file and startLine are required" };
+  }
+  try {
+    const state = moveCommand(request.params.id, {
+      ...request.body,
+      label: request.body.label || PEARL_NAME,
+    });
+    return { ok: true, pendingCommand: state.pendingCommand };
+  } catch (err) {
+    if (err instanceof VscodeNotConnectedError) {
+      reply.code(404);
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
+});
+
+// Removes the agent's decorations entirely — called when a round completes
+// or a walkthrough job ends, so the presence marker doesn't linger.
+app.post("/api/vscode/:id/clear", async (request, reply) => {
+  try {
+    const state = clearCommand(request.params.id);
+    return { ok: true, pendingCommand: state.pendingCommand };
+  } catch (err) {
+    if (err instanceof VscodeNotConnectedError) {
+      reply.code(404);
+      return { ok: false, error: err.message };
+    }
+    throw err;
+  }
 });
 
 // Opens a real iTerm2 window on this machine, attached to the job's tmux

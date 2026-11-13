@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WITH_MCP=false
 WITH_PTT=false
 WITH_MEMORY=false
+WITH_VSCODE_EXT=false
 
 usage() {
   echo "Usage: ./install.sh [options]"
@@ -15,11 +16,12 @@ usage() {
   echo "Always runs: npm install, .env setup, commands/ symlinks, tmux/iTerm2/gh/Hammerspoon checks."
   echo ""
   echo "Optional (off by default):"
-  echo "  --mcp       Register the Atlassian MCP server (needed for Pearl's Jira work)"
-  echo "  --ptt       Set up push-to-talk voice input for Pearl (Hammerspoon + Superwhisper glue)"
-  echo "  --memory    Install Basic Memory for Pearl's persistent, local-only memory (~0.5 GB)"
-  echo "  --all       Enable all of the above"
-  echo "  -h, --help  Show this help"
+  echo "  --mcp         Register the Atlassian MCP server (needed for Pearl's Jira work)"
+  echo "  --ptt         Set up push-to-talk voice input for Pearl (Hammerspoon + Superwhisper glue)"
+  echo "  --memory      Install Basic Memory for Pearl's persistent, local-only memory (~0.5 GB)"
+  echo "  --vscode-ext  Build and install the Pair Pal VS Code extension (agent presence in your editor)"
+  echo "  --all         Enable all of the above except --vscode-ext (see note below; always opt-in)"
+  echo "  -h, --help    Show this help"
 }
 
 for arg in "$@"; do
@@ -27,6 +29,12 @@ for arg in "$@"; do
     --mcp) WITH_MCP=true ;;
     --ptt) WITH_PTT=true ;;
     --memory) WITH_MEMORY=true ;;
+    --vscode-ext) WITH_VSCODE_EXT=true ;;
+    # --vscode-ext deliberately stays out of --all: installing a VS Code
+    # extension is a bigger footprint change than the other optional flags
+    # (it sideloads into the user's editor, not just this repo's own
+    # tooling), so it always requires the explicit flag, every time. Don't
+    # add it here even if --all grows more entries later.
     --all) WITH_MCP=true; WITH_PTT=true; WITH_MEMORY=true ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -302,6 +310,35 @@ else
   echo "Skipping Pearl's memory setup (pass --memory or --all to enable)."
 fi
 
+if [ "$WITH_VSCODE_EXT" = true ]; then
+  echo ""
+  echo "Building and installing the Pair Pal VS Code extension..."
+
+  # vsce package builds the .vsix entirely locally — nothing is uploaded or
+  # published to the Marketplace (see .plans/vscode-walkthrough-bridge.md).
+  if ! command -v code >/dev/null 2>&1; then
+    echo "  Warning: the 'code' CLI isn't on PATH — can't install the extension."
+    echo "    In VS Code: Cmd+Shift+P -> 'Shell Command: Install \"code\" command in PATH'"
+  else
+    (cd "$SCRIPT_DIR/vscode-extension" && npm install --no-fund --no-audit)
+    VSIX_PATH="$SCRIPT_DIR/vscode-extension/pair-pal.vsix"
+    if (cd "$SCRIPT_DIR/vscode-extension" && npx vsce package --out pair-pal.vsix); then
+      if code --install-extension "$VSIX_PATH"; then
+        echo "  Installed Pair Pal into VS Code"
+        echo "  Set commandCenter.sessionId in VS Code settings to the review id you want to connect to"
+      else
+        echo "  Warning: 'code --install-extension' failed — install manually:"
+        echo "    code --install-extension $VSIX_PATH"
+      fi
+    else
+      echo "  Warning: vsce package failed — see vscode-extension/README.md for manual steps."
+    fi
+  fi
+else
+  echo ""
+  echo "Skipping Pair Pal VS Code extension (pass --vscode-ext to enable — never included in --all)."
+fi
+
 echo ""
 echo "Done."
 echo ""
@@ -325,6 +362,13 @@ else
   echo "  4. Push-to-talk voice input for Pearl wasn't set up — re-run with --ptt"
   echo "     (or --all) when you want it"
 fi
-echo "  5. Run: npm run dev"
+if [ "$WITH_VSCODE_EXT" = true ]; then
+  echo "  5. Pair Pal is installed — set commandCenter.sessionId in VS Code settings"
+  echo "     to try it (see vscode-extension/README.md for a manual smoke checklist)"
+else
+  echo "  5. Pair Pal (agent presence in VS Code) wasn't installed — re-run with"
+  echo "     --vscode-ext when you want it (always explicit, never part of --all)"
+fi
+echo "  6. Run: npm run dev"
 echo "     This starts both the API (port 3789) and the Vite dev server (port 5173)"
-echo "  6. Open http://localhost:5173"
+echo "  7. Open http://localhost:5173"

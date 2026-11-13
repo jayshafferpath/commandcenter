@@ -1,0 +1,46 @@
+{
+  "name": "pair-pal",
+  "displayName": "Pair Pal",
+  "description": "Shows the Command Center agent's own presence (caret, selection, follow mode) in your editor while it walks you through a review — never moves your real cursor.",
+  "version": "0.1.0",
+  "publisher": "commandcenter-local",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:.git"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pairPal.toggleFollowAgent",
+        "title": "Pair Pal: Toggle Follow Agent"
+      }
+    ],
+    "configuration": {
+      "title": "Pair Pal",
+      "properties": {
+        "commandCenter.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:3789",
+          "description": "Base URL of the local Command Center API."
+        },
+        "commandCenter.sessionId": {
+          "type": "string",
+          "default": "",
+          "description": "The review/walkthrough id to connect to. Set per-workspace once Command Center hands this out automatically; until then, set it by hand to smoke-test."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package --out pair-pal.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  }
+}
