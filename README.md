@@ -119,6 +119,8 @@ lives in one skill per capability, in `commands/`, loaded only when needed:
 | `/cc-todos` | Supervisor agent | Listing, adding, and completing todos |
 | `/cc-prs` | Supervisor agent | Listing open PRs; posting one to Slack |
 | `/cc-memory` | Supervisor agent | Searching and saving its memory |
+| `/cc-review-start` | Supervisor agent | Starting a review, or dispatching the next round's walkthrough |
+| `/cc-review-abandon` | Supervisor agent | Dropping a review without shipping it |
 | `/cc-brain-view` | Dispatched agents | Using the Brain View canvas |
 | `/cc-voice` | Dispatched agents | Speaking text aloud through `POST /api/voice/:id/speak` |
 | `/cc-report` | Dispatched agents | Reporting back to the supervisor agent when done |

@@ -58,6 +58,8 @@ function briefing({ apiBase, repoRoot, memoryEnabled = false }) {
     "/cc-tickets (read and change the user's Jira tickets)",
     "/cc-todos (their personal todos)",
     "/cc-prs (their open PRs, and posting one to Slack)",
+    "/cc-review-start (starting a review, or dispatching the next round's walkthrough)",
+    "/cc-review-abandon (dropping a review without shipping it)",
     memoryEnabled ? "/cc-memory (your persistent memory)" : null,
   ].filter(Boolean);
 
