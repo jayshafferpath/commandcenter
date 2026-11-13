@@ -31,9 +31,11 @@ import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
 import { createMemory, findMemoryBin, MemoryError, MemoryExistsError, MemoryNotFoundError } from "./lib/pearl-memory.js";
 import {
+  abandonReview,
   addComment,
   completeRound,
   confirmChecklistItem,
+  dispatchWalkthrough,
   getRound,
   getSession,
   listComments,
@@ -614,6 +616,19 @@ app.post("/api/dispatch", async (request, reply) => {
       reply.code(400);
       return { ok: false, error: `Unknown review ${context?.id}` };
     }
+    // The one place a walkthrough job's dispatch actually happens — moves
+    // the review out of ROUND_READY so the round this job is about to walk
+    // is recorded as in progress, not just computed. See the "State
+    // machine" section of .plans/interactive-review-loop.md: this is what
+    // replaces "session.status flips to walkthrough the instant a round's
+    // diff exists" with an explicit event tied to a job actually starting.
+    if (role === "walkthrough") {
+      const dispatched = dispatchWalkthrough(session.id);
+      if (!dispatched.ok) {
+        reply.code(400);
+        return { ok: false, error: dispatched.error };
+      }
+    }
     reviewId = session.id;
     reviewRole = role;
     cwd = session.repo;
@@ -783,12 +798,17 @@ app.post("/api/review/:id/round/:n/comments", async (request, reply) => {
 
 app.post("/api/review/:id/round/:n/checklist/:k/confirm", async (request, reply) => {
   const round = Number.parseInt(request.params.n, 10);
-  const updated = confirmChecklistItem(request.params.id, round, request.params.k);
-  if (!updated) {
-    reply.code(404);
-    return { ok: false, error: "Unknown review, round, or checklist item" };
+  try {
+    const updated = confirmChecklistItem(request.params.id, round, request.params.k);
+    if (!updated) {
+      reply.code(404);
+      return { ok: false, error: "Unknown review, round, or checklist item" };
+    }
+    return { ok: true, round: updated };
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: err.message };
   }
-  return { ok: true, round: updated };
 });
 
 // Replaces the round's walk order. Validation (every chunk in exactly one
@@ -829,6 +849,15 @@ app.post("/api/review/:id/round/:n/complete", async (request, reply) => {
   const { force } = request.body || {};
   const result = completeRound(request.params.id, round, { force: Boolean(force) });
   if (!result.ok) reply.code(400);
+  return result;
+});
+
+// Drops a review without shipping it. Legal from any non-terminal state;
+// an already-approved or already-abandoned review refuses (400) rather
+// than silently re-abandoning.
+app.post("/api/review/:id/abandon", async (request, reply) => {
+  const result = abandonReview(request.params.id);
+  if (!result.ok) reply.code(result.notFound ? 404 : 400);
   return result;
 });
 

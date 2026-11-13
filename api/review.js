@@ -17,6 +17,15 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import {
+  EVENTS,
+  GuardFailedError,
+  IllegalTransitionError,
+  migrateLegacySession,
+  NONE,
+  STATES,
+  transition,
+} from "./lib/review-fsm.js";
 
 // Generic, diff-content-blind checklist — Phase 0 proves the loop's
 // mechanics before investing in smarter, per-chunk checklist generation
@@ -61,6 +70,58 @@ function writeJson(path, data) {
 
 function git(repoRoot, args) {
   return execFileSync("git", args, { cwd: repoRoot, encoding: "utf-8" }).trim();
+}
+
+// Effect tag -> the structured notice a caller (an API route, then the
+// cc-review-* skill that called it) relays to Pearl. Kept here, not in
+// review-fsm.js, since the FSM only knows the tag — building the actual
+// message needs session/round data the pure transition function never
+// sees.
+function describeEffect(tag, session, round) {
+  switch (tag) {
+    case "notify_pearl_round_ready":
+      return {
+        type: tag,
+        message: `Review ${session.id} round ${round} is ready to walk (${session.repo}).`,
+      };
+    case "notify_pearl_review_approved":
+      return {
+        type: tag,
+        message: `Review ${session.id} is approved as of round ${round} (${session.repo}) — no new comments.`,
+      };
+    default:
+      return { type: tag };
+  }
+}
+
+// Every state-mutating route goes through this: read the session (migrating
+// legacy on-disk data as it's read — "start equals recover"), run the one
+// pure transition, persist the result, and translate a thrown
+// Illegal/GuardFailed error into the same {ok:false, error} shape every
+// other route in this file already returns, so server.js doesn't need to
+// know the FSM exists.
+function applyTransition(id, event, payload = {}) {
+  const session = getSession(id);
+  if (!session) return { ok: false, notFound: true, error: "Unknown review" };
+
+  try {
+    const { state, noop, effects } = transition(session.state, event, payload);
+    const updated = updateSession(id, { state });
+    return {
+      ok: true,
+      noop,
+      session: updated,
+      effects: effects.map((tag) => describeEffect(tag, updated, updated.currentRound)),
+    };
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) {
+      return { ok: false, error: err.message, code: err.code };
+    }
+    if (err instanceof GuardFailedError) {
+      return { ok: false, error: err.message, code: err.code, reason: err.reason };
+    }
+    throw err;
+  }
 }
 
 // Splits `git diff <base>..<head>` output into one chunk per changed file —
@@ -121,6 +182,10 @@ export function startReview({ repo, baseBranch, prUrl = null }) {
 
   const id = randomUUID();
   const now = new Date().toISOString();
+  // START_REVIEW always legal from NONE (a review with this id has never
+  // existed before randomUUID()) — no try/catch needed here, unlike every
+  // other transition below.
+  const { state } = transition(NONE, EVENTS.START_REVIEW);
 
   writeJson(sessionPathFor(id), {
     id,
@@ -133,7 +198,7 @@ export function startReview({ repo, baseBranch, prUrl = null }) {
     // reconstruct the full-branch diff/log, not just its own incremental
     // slice against the previous round.
     rootBaseSha: baseSha,
-    status: "walkthrough",
+    state,
     currentRound: 1,
     createdAt: now,
     updatedAt: now,
@@ -151,8 +216,18 @@ export function startReview({ repo, baseBranch, prUrl = null }) {
   return { id, round: 1 };
 }
 
+// Migrates legacy `status`-only sessions in place as they're read — the
+// first read after an upgrade rewrites the file, every read after that is
+// already in the new shape. Re-running this migration (restart, retry,
+// crash mid-write) is safe: migrateLegacySession is a no-op once `state`
+// is present.
 export function getSession(id) {
-  return readJson(sessionPathFor(id));
+  const session = readJson(sessionPathFor(id));
+  if (!session) return null;
+
+  const migrated = migrateLegacySession(session);
+  if (migrated !== session) writeJson(sessionPathFor(id), migrated);
+  return migrated;
 }
 
 export function getRound(id, round) {
@@ -176,8 +251,13 @@ export function listReviews() {
 // would have. A comment's current state is whichever line for its id comes
 // last in the log.
 export function addComment(id, round, { chunkId = null, file = null, line = null, text }) {
-  if (!getSession(id) || !getRound(id, round)) return null;
+  const session = getSession(id);
+  if (!session || !getRound(id, round)) return null;
   if (!text || !text.trim()) throw new Error("text is required");
+  // Throws IllegalTransitionError (a round that's awaiting/getting changes,
+  // or already approved/abandoned) — ADD_COMMENT is a self-loop, so this
+  // never changes `state`, it only gates on it.
+  transition(session.state, EVENTS.ADD_COMMENT);
 
   const comment = {
     id: `cm_${randomUUID()}`,
@@ -253,6 +333,19 @@ export function resolveComment(id, commentId, { status, note, files = [] }) {
     return { ok: false, error: `files must be at most ${MAX_RESOLUTION_FILES} repo-relative paths` };
   }
 
+  // Guarded before the ledger is touched: a comment can only be resolved
+  // once its round has actually closed (AWAITING_CHANGE_JOB) or while a
+  // change job is already working the rest of the queue
+  // (CHANGES_IN_PROGRESS) — never while the round is still open for new
+  // comments.
+  let transitionResult;
+  try {
+    transitionResult = transition(session.state, EVENTS.RESOLVE_COMMENT);
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) return { ok: false, error: err.message, code: err.code };
+    throw err;
+  }
+
   const entry = {
     ...comment,
     status,
@@ -262,7 +355,7 @@ export function resolveComment(id, commentId, { status, note, files = [] }) {
     resolvedAt: new Date().toISOString(),
   };
   appendFileSync(commentsPathFor(id), `${JSON.stringify(entry)}\n`, "utf-8");
-  if (session.status === "awaiting_changes") updateSession(id, { status: "changes_in_progress" });
+  if (!transitionResult.noop) updateSession(id, { state: transitionResult.state });
   return { ok: true, comment: entry };
 }
 
@@ -289,24 +382,48 @@ export function nextRound(id, round) {
 
   const existing = getRound(id, round + 1);
   if (existing) {
-    if (session.currentRound < round + 1) {
-      updateSession(id, { currentRound: round + 1, status: "walkthrough" });
-    }
+    // ADVANCE_ROUND's own idempotency (ROUND_READY -> ROUND_READY, a noop)
+    // covers the state; currentRound still needs bumping on a genuine
+    // retry (a crash between writeJson and updateSession below).
+    if (session.currentRound < round + 1) updateSession(id, { currentRound: round + 1 });
     return { ok: true, round: existing, alreadyExisted: true };
   }
 
+  // A concrete, round-scoped fact, checked ahead of the FSM: `session.state`
+  // tracks the review's *current* stage, which for round 1 reads
+  // ROUND_READY both before round 1 has ever been completed and (for a
+  // later round) after it has — the two aren't distinguishable from
+  // `state` alone the way ADVANCE_ROUND's own idempotency check needs.
+  // `roundData.completedAt` is unambiguous either way.
   if (!roundData.completedAt) return { ok: false, error: `Round ${round} isn't complete yet` };
 
   const comments = listComments(id, { round });
   const openCommentIds = comments.filter((c) => c.status === "open").map((c) => c.id);
-  if (openCommentIds.length) {
-    return { ok: false, error: `${openCommentIds.length} comment(s) from round ${round} are still open`, openCommentIds };
-  }
+  const workingTreeDirty = Boolean(
+    // Uncommitted edits wouldn't show up in a commit-to-commit diff, so
+    // they'd silently skip review rather than fail loudly here.
+    git(session.repo, ["status", "--porcelain"]),
+  );
 
-  // Uncommitted edits wouldn't show up in a commit-to-commit diff, so they'd
-  // silently skip review rather than fail loudly here.
-  if (git(session.repo, ["status", "--porcelain"])) {
-    return { ok: false, error: `Working tree in ${session.repo} has uncommitted changes; commit them first` };
+  let transitionResult;
+  try {
+    transitionResult = transition(session.state, EVENTS.ADVANCE_ROUND, {
+      openCommentCount: openCommentIds.length,
+      workingTreeClean: !workingTreeDirty,
+    });
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) return { ok: false, error: err.message, code: err.code };
+    if (err instanceof GuardFailedError) {
+      if (err.reason === "open_comments") {
+        return {
+          ok: false,
+          error: `${openCommentIds.length} comment(s) from round ${round} are still open`,
+          openCommentIds,
+        };
+      }
+      return { ok: false, error: `Working tree in ${session.repo} has uncommitted changes; commit them first` };
+    }
+    throw err;
   }
 
   const headSha = git(session.repo, ["rev-parse", "HEAD"]);
@@ -329,9 +446,16 @@ export function nextRound(id, round) {
     completedAt: null,
   };
 
+  // Round file written before the session is bumped: a crash in between
+  // leaves a round the session hasn't caught up to yet, which the
+  // `existing` branch above repairs on the next call.
   writeJson(roundPathFor(id, round + 1), next);
-  updateSession(id, { currentRound: round + 1, status: "walkthrough" });
-  return { ok: true, round: next };
+  const updated = updateSession(id, { currentRound: round + 1, state: transitionResult.state });
+  return {
+    ok: true,
+    round: next,
+    effects: transitionResult.effects.map((tag) => describeEffect(tag, updated, round + 1)),
+  };
 }
 
 // Checklist confirmation lives on the round file directly (one writer — the
@@ -339,8 +463,12 @@ export function nextRound(id, round) {
 // comments, which need the append-only ledger because two different job
 // types touch them across rounds.
 export function confirmChecklistItem(id, round, checklistId) {
+  const session = getSession(id);
   const roundData = getRound(id, round);
-  if (!roundData) return null;
+  if (!session || !roundData) return null;
+  // Throws IllegalTransitionError once the round has moved past
+  // WALKTHROUGH_IN_PROGRESS — same self-loop guard as ADD_COMMENT.
+  transition(session.state, EVENTS.CONFIRM_CHECKLIST_ITEM);
 
   let found = null;
   for (const chunk of roundData.chunks) {
@@ -429,17 +557,60 @@ export function completeRound(id, round, { force = false } = {}) {
   const unconfirmed = roundData.chunks
     .flatMap((c) => c.checklist)
     .filter((k) => k.status !== "confirmed").length;
-  if (unconfirmed > 0 && !force) {
-    return { ok: false, error: `${unconfirmed} checklist item(s) not confirmed yet`, unconfirmed };
+  const commentCountThisRound = listComments(id, { round }).length;
+
+  let transitionResult;
+  try {
+    transitionResult = transition(session.state, EVENTS.COMPLETE_ROUND, {
+      unconfirmedChecklistCount: unconfirmed,
+      force,
+      commentCountThisRound,
+    });
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) return { ok: false, error: err.message, code: err.code };
+    if (err instanceof GuardFailedError) {
+      return { ok: false, error: `${unconfirmed} checklist item(s) not confirmed yet`, unconfirmed };
+    }
+    throw err;
   }
 
   const now = new Date().toISOString();
   roundData.completedAt = now;
   writeJson(roundPathFor(id, round), roundData);
 
-  session.status = "awaiting_changes";
-  session.updatedAt = now;
-  writeJson(sessionPathFor(id), session);
+  const updated = updateSession(id, { state: transitionResult.state });
+  return {
+    ok: true,
+    session: updated,
+    round: roundData,
+    effects: transitionResult.effects.map((tag) => describeEffect(tag, updated, round)),
+  };
+}
 
-  return { ok: true, session, round: roundData };
+// Dispatched by server.js's /api/dispatch whenever a review-role job with
+// role "walkthrough" actually starts — the moment this review's current
+// round stops being merely computed (ROUND_READY) and starts being
+// actively walked. Idempotent: a retry, or round 1's dispatch landing
+// while it's already in progress, is a no-op (see DISPATCH_WALKTHROUGH in
+// review-fsm.js).
+export function dispatchWalkthrough(id) {
+  const session = getSession(id);
+  if (!session) return { ok: false, notFound: true, error: "Unknown review" };
+
+  try {
+    const { state, noop } = transition(session.state, EVENTS.DISPATCH_WALKTHROUGH);
+    const updated = noop ? session : updateSession(id, { state });
+    return { ok: true, noop, session: updated };
+  } catch (err) {
+    if (err instanceof IllegalTransitionError) return { ok: false, error: err.message, code: err.code };
+    throw err;
+  }
+}
+
+// Jay drops a review without shipping it. Legal from any non-terminal
+// state; a review already APPROVED or ABANDONED can't be abandoned again
+// (IllegalTransitionError), matching every other terminal-state guard in
+// this file.
+export function abandonReview(id) {
+  return applyTransition(id, EVENTS.ABANDON);
 }

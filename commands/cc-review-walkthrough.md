@@ -61,6 +61,13 @@ narration. Don't do this reflexively for every element; most don't need it.
 
 ## Load the round
 
+Being dispatched with `role: "walkthrough"` already fired this review's
+`DISPATCH_WALKTHROUGH` event server-side — the round you're about to walk
+moved from merely computed (`round_ready`) to actively in progress
+(`walkthrough_in_progress`) the moment your job started, not when you
+personally do anything. Nothing for you to call here; it's background for
+why `completeRound`'s guards behave the way they do below.
+
 ```bash
 curl -s "$API/api/review/$ID/round/$N"
 ```
@@ -224,9 +231,16 @@ curl -s -X POST "$API/api/review/$ID/round/$N/comments" \
 
 ## Ending the round
 
+This review is a state machine (`.plans/interactive-review-loop.md`'s
+"State machine" section, implemented in `api/lib/review-fsm.js`) — every
+route below is a named event, not a flag you're setting. You're not
+tracking the review's lifecycle yourself; you're firing events and reading
+back whatever state they land on.
+
 When Jay says he's done reviewing for this round (listen for something
 like "that's it for now" / "send it" / "I'm good with this round" — there's
-no fixed phrase yet, see the design doc's open question #4):
+no fixed phrase yet, see the design doc's open question #4), fire
+`COMPLETE_ROUND`:
 
 ```bash
 curl -s -X POST "$API/api/review/$ID/round/$N/complete"
@@ -237,19 +251,26 @@ yet", unconfirmed: N}`, either go back and confirm the remaining items, or
 — only if Jay explicitly says to skip them — retry with
 `{"force": true}`.
 
-If the round has no comments, there's nothing to change: tell Jay the
-review is done and stop here.
+Read the response's `session.state`, not whether the round had comments
+yourself:
 
-Otherwise, dispatch the change agent:
+- **`approved`** — the round had no comments, so `COMPLETE_ROUND` went
+  straight to the terminal `approved` state (the FSM does this, not a
+  judgment call you make). Tell Jay the review is done and stop here.
+  There's nothing to dispatch.
+- **`awaiting_change_job`** — the round had at least one comment. Dispatch
+  the change agent, which fires `RESOLVE_COMMENT` (and later `ADVANCE_ROUND`)
+  on your behalf:
 
-```bash
-curl -s -X POST "$API/api/dispatch" -H 'Content-Type: application/json' \
-  -d '{"prompt": "/cc-review-changes", "context": {"type": "review", "id": "'"$ID"'", "role": "changes"}, "mode": "interactive"}'
-```
+  ```bash
+  curl -s -X POST "$API/api/dispatch" -H 'Content-Type: application/json' \
+    -d '{"prompt": "/cc-review-changes", "context": {"type": "review", "id": "'"$ID"'", "role": "changes"}, "mode": "interactive"}'
+  ```
 
-It must be `interactive`: the change agent stops to ask Jay before it
-pushes back on any comment. A 409 means a change agent for this review is
-already running; report its `jobId` instead of starting another.
+  It must be `interactive`: the change agent stops to ask Jay before it
+  pushes back on any comment. A 409 means a change agent for this review is
+  already running; report its `jobId` instead of starting another.
 
-Tell Jay in one line that the change agent is working (it will speak up if
-it needs him), then report to the supervisor with `/cc-report`.
+Tell Jay in one line what happened (approved and done, or the change agent
+is working — it will speak up if it needs him), then report to the
+supervisor with `/cc-report`.

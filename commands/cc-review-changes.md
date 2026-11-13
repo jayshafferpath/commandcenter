@@ -8,6 +8,12 @@ You're the change agent for one round of an interactive review loop. Your
 prompt names the review id and round, and you're running in the review's
 repo. Use the API base from your briefing (default `http://localhost:3789`).
 
+This review is a state machine (`.plans/interactive-review-loop.md`'s
+"State machine" section, implemented in `api/lib/review-fsm.js`). Every
+route below fires a named event server-side; your job is to call them in
+order and act on what they return, not to track the review's lifecycle
+yourself.
+
 ## Load the comments
 
 ```bash
@@ -35,6 +41,13 @@ curl -s -X POST "$API/api/review/$ID/comments/<commentId>/resolution" \
 exactly as git reports them. The next round uses it to match each changed
 file back to the comment that caused it. A file you change that no
 resolution names shows up there as "not tied to a comment."
+
+This fires `RESOLVE_COMMENT`: the first resolution in the round moves the
+review from `awaiting_change_job` to `changes_in_progress`; every
+resolution after that is a no-op on the review's state (you're still the
+one job working the queue). You don't need to read or report this state
+yourself — it's what lets `next` (below) tell whether you're actually
+done.
 
 **If you disagree, stop and ask Jay. Never decline a comment on your
 own.** Bring your terminal to the front and tell him out loud:
@@ -74,13 +87,36 @@ When every comment from round N is resolved or pushed back:
    Skip the commit if every comment was pushed back and nothing changed.
    Never push. Never amend. Never skip hooks; if one fails, fix the cause
    and make a new commit.
-3. Open the next round:
+3. Open the next round — this fires `ADVANCE_ROUND`:
    ```bash
    curl -s -X POST "$API/api/review/$ID/round/$N/next"
    ```
    It refuses while any round N comment is still open, or while the working
    tree has uncommitted changes. The response lists what's wrong. Calling it
-   twice is safe.
-4. Say "Round N+1 is ready" out loud through the voice route, then report
-   to the supervisor (`/cc-report`): how many comments you resolved and
-   pushed back, the commit sha, and anything you noticed but left alone.
+   twice is safe (the second call is a no-op: you'll get back
+   `alreadyExisted: true` and no `effects`).
+
+4. **The response's `effects` array is not optional background — it's the
+   fix for the exact gap this state machine replaced.** A successful call
+   returns
+   `effects: [{"type": "notify_pearl_round_ready", "message": "Review $ID
+   round N+1 is ready to walk (<repo>)."}]`. Previously, telling the
+   supervisor that the next round existed was left to this step's own
+   end-of-job courtesy report — which is exactly how round 2 of a real
+   review sat unnoticed until Jay happened to go looking. Now it's a
+   required step, not a courtesy:
+
+   - Say the effect's `message` out loud through the voice route.
+   - Send that same message to the supervisor via `SendMessage`
+     **before** your `/cc-report` wrap-up, as its own explicit statement —
+     not folded into a generic "I'm done" report where it can get lost.
+     Include it even if `/cc-report` also covers your overall status.
+
+   If `effects` is empty (shouldn't happen on a successful `next` call —
+   say so in your report if it does), you don't owe a round-ready
+   notification, but you should never *skip* sending one when `effects`
+   names one.
+
+5. Report to the supervisor (`/cc-report`): how many comments you resolved
+   and pushed back, the commit sha, and anything you noticed but left
+   alone.
