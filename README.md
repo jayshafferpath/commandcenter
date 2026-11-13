@@ -120,7 +120,10 @@ lives in one skill per capability, in `commands/`, loaded only when needed:
 | `/cc-prs` | Supervisor agent | Listing open PRs; posting one to Slack |
 | `/cc-memory` | Supervisor agent | Searching and saving its memory |
 | `/cc-brain-view` | Dispatched agents | Using the Brain View canvas |
+| `/cc-voice` | Dispatched agents | Speaking text aloud through `POST /api/voice/:id/speak` |
 | `/cc-report` | Dispatched agents | Reporting back to the supervisor agent when done |
+| `/cc-review-walkthrough` | Review walkthrough jobs | Walking a review round in VS Code and capturing comments |
+| `/cc-review-changes` | Review change jobs | Working a round's comments, committing once, opening the next round |
 
 The supervisor's briefing and each dispatched prompt carry a pointer to the
 right skills, plus the few rules that must hold even if a skill never loads.

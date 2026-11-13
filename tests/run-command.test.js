@@ -1,5 +1,8 @@
+import { rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { serializeJob, __test__ } from "../api/run-command.js";
+import { findRunningJobForReview, serializeJob, __test__ } from "../api/run-command.js";
 
 const {
   truncate,
@@ -171,6 +174,47 @@ describe("syncJobsFromTmux", () => {
     t.syncJobsFromTmux();
     expect(t.jobs.has("pearl")).toBe(false);
     expect(t.jobs.has("abc123")).toBe(true);
+  });
+
+  it("recovers a review job's reviewId from its meta file after an API restart", async () => {
+    const id = "review-adopt-test";
+    const metaPath = join(tmpdir(), "ccenter-jobs", `${id}.meta.json`);
+    writeFileSync(metaPath, JSON.stringify({ id, reviewId: "rev-1", reviewRole: "changes", title: "Review changes: round 1" }));
+    try {
+      const t = await loadWithSessions([`ccenter-${id}`]);
+      t.syncJobsFromTmux();
+      expect(t.jobs.get(id)).toMatchObject({ reviewId: "rev-1", reviewRole: "changes" });
+    } finally {
+      rmSync(metaPath, { force: true });
+    }
+  });
+});
+
+describe("findRunningJobForReview", () => {
+  const { jobs } = __test__;
+
+  afterEach(() => {
+    jobs.delete("rj-1");
+  });
+
+  it("finds a running job for the review and role", () => {
+    jobs.set("rj-1", { id: "rj-1", reviewId: "rev-1", reviewRole: "changes", status: "running" });
+    expect(findRunningJobForReview("rev-1", "changes")?.id).toBe("rj-1");
+  });
+
+  it("still counts a job stuck on a prompt as running", () => {
+    jobs.set("rj-1", { id: "rj-1", reviewId: "rev-1", reviewRole: "changes", status: "needs_input" });
+    expect(findRunningJobForReview("rev-1", "changes")?.id).toBe("rj-1");
+  });
+
+  it("doesn't let a running walkthrough block its own change agent", () => {
+    jobs.set("rj-1", { id: "rj-1", reviewId: "rev-1", reviewRole: "walkthrough", status: "running" });
+    expect(findRunningJobForReview("rev-1", "changes")).toBeNull();
+  });
+
+  it("ignores a finished job, so a later round can dispatch again", () => {
+    jobs.set("rj-1", { id: "rj-1", reviewId: "rev-1", reviewRole: "changes", status: "succeeded" });
+    expect(findRunningJobForReview("rev-1", "changes")).toBeNull();
   });
 });
 

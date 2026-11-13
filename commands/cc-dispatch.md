@@ -16,8 +16,12 @@ curl -s -X POST "$API/api/dispatch" -H 'Content-Type: application/json' \
 
 - `prompt` (required): the instruction. Write it the way you'd brief a
   colleague: what to do, why, and what done looks like.
-- `context`: `{"type": "ticket", "key": "..."}` to work a ticket, or
-  `{"type": "none"}` for a free-form task.
+- `context`: `{"type": "ticket", "key": "..."}` to work a ticket,
+  `{"type": "review", "id": "...", "role": "walkthrough" | "changes"}` for a
+  review-loop round (runs in the review's repo; `role` defaults to
+  `changes`), or `{"type": "none"}` for a free-form task. To start a
+  review round's walkthrough, use `"prompt": "/cc-review-walkthrough"` with
+  `"role": "walkthrough"`; the walkthrough dispatches its own change agent.
 - `mode`: `"interactive"` or `"headless"`. The API defaults to headless, but
   **always pass `"interactive"`** unless the user says otherwise. Headless runs
   exit silently the first time they hit a permission prompt.
@@ -38,8 +42,8 @@ Responses:
 | Status | Meaning | What to do |
 |---|---|---|
 | 200 `{ok: true, job}` | Started. `job.id` identifies it. | Tell the user it's running |
-| 409 `{jobId}` | That ticket already has a running job | Report that job instead of starting another |
-| 400 | Unknown ticket, or its `repo:` label names a repo that isn't cloned | Relay the error. Don't guess a repo |
+| 409 `{jobId}` | That ticket, or that review role, already has a running job | Report that job instead of starting another |
+| 400 | Unknown ticket or review, or a ticket's `repo:` label names a repo that isn't cloned | Relay the error. Don't guess a repo |
 
 An interactive dispatch through the API does **not** open a terminal. If the user
 wants to watch or drive it, open one (below).

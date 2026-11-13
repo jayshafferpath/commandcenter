@@ -16,6 +16,7 @@ import { isPrUrl, searchMyPrs, viewPr } from "./lib/pr.js";
 import { adfToPlainText } from "./lib/adf.js";
 import {
   closeJob,
+  findRunningJobForReview,
   findRunningJobForTicket,
   getJob,
   listJobs,
@@ -29,6 +30,20 @@ import { repoNotFoundError, resolveRepoRoot } from "./lib/util.js";
 import { loadDevRoot, getJiraAuth } from "./lib/config.js";
 import { announcePr, isAnnounceConfigured, loadPostedUrls } from "./lib/slack-pr-announce.js";
 import { createMemory, findMemoryBin, MemoryError, MemoryExistsError, MemoryNotFoundError } from "./lib/pearl-memory.js";
+import {
+  addComment,
+  completeRound,
+  confirmChecklistItem,
+  getRound,
+  getSession,
+  listComments,
+  listReviews,
+  nextRound,
+  resolveComment,
+  setRoundGroups,
+  startReview,
+} from "./review.js";
+import { hush as hushVoice, isValidVoiceId, speak as speakVoice, voiceInstructions } from "./voice.js";
 
 // Personal todos are Jira issues too — a different label, not a different
 // system. Kept configurable rather than hardcoded since the project/label
@@ -39,6 +54,8 @@ import { createMemory, findMemoryBin, MemoryError, MemoryExistsError, MemoryNotF
 const TODO_PROJECT_KEY = process.env.TODO_PROJECT_KEY || "";
 const TODO_ISSUE_TYPE = process.env.TODO_ISSUE_TYPE || "Task";
 const TODO_LABEL = process.env.TODO_LABEL || "Todo";
+
+const REVIEW_ROLES = ["walkthrough", "changes"];
 
 // Cached for the process lifetime — it's the same account on every request.
 let currentUserAccountId = null;
@@ -584,6 +601,34 @@ app.post("/api/dispatch", async (request, reply) => {
     composedPrompt = `${header}\n\n${prompt}`;
   }
 
+  let reviewId = null;
+  let reviewRole = null;
+  if (type === "review") {
+    const role = context?.role ?? "changes";
+    if (!REVIEW_ROLES.includes(role)) {
+      reply.code(400);
+      return { ok: false, error: `context.role must be one of ${REVIEW_ROLES.join(", ")}` };
+    }
+    const session = getSession(context?.id);
+    if (!session) {
+      reply.code(400);
+      return { ok: false, error: `Unknown review ${context?.id}` };
+    }
+    reviewId = session.id;
+    reviewRole = role;
+    cwd = session.repo;
+    title = `Review ${role === "walkthrough" ? "walkthrough" : "changes"}: round ${session.currentRound}`;
+    const header = [
+      `Context: review ${session.id}, round ${session.currentRound} (${role})`,
+      `Repo: ${session.repo}`,
+      `Base branch: ${session.baseBranch} (feature starts at ${session.rootBaseSha})`,
+      session.prUrl ? `PR: ${session.prUrl}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    composedPrompt = `${header}\n\n${prompt}`;
+  }
+
   // Every dispatched agent sizes its own model before touching the actual
   // task — /automodel reads the context right below it (a ticket's
   // complexity label/description, or lack of ticket context at all) and
@@ -616,6 +661,14 @@ app.post("/api/dispatch", async (request, reply) => {
     }
   }
 
+  if (reviewId) {
+    const existing = findRunningJobForReview(reviewId, reviewRole);
+    if (existing) {
+      reply.code(409);
+      return { ok: false, error: `A ${reviewRole} job is already running for review ${reviewId}`, jobId: existing.id };
+    }
+  }
+
   // Every dispatched agent gets a brain dir and permission to write to it —
   // the agent decides for itself whether to actually use it (see
   // brainInstructions), not a human at dispatch time. The id has to be
@@ -626,11 +679,19 @@ app.post("/api/dispatch", async (request, reply) => {
   const jobId = randomUUID();
   const brainDir = ensureBrainDir(jobId);
   composedPrompt = `${composedPrompt}\n\n${brainInstructions(canvasPathFor(jobId))}`;
+  // Same unconditional, agent-decides posture as Brain View above — every
+  // dispatched job gets the option, keyed by its own jobId.
+  composedPrompt = `${composedPrompt}\n\n${voiceInstructions(jobId, `http://localhost:${PORT}`)}`;
+  // A review change job opens its own terminal when it needs Jay's call on a
+  // comment (see /cc-review-changes), so it has to know its own job id.
+  if (reviewId) composedPrompt = `${composedPrompt}\n\nYour Command Center job id is ${jobId}.`;
   const extraArgs = `--add-dir '${brainDir}'`;
 
   const job = startCommandJob({
     id: jobId,
     ticketKey,
+    reviewId,
+    reviewRole,
     title,
     prompt: composedPrompt,
     cwd,
@@ -640,6 +701,165 @@ app.post("/api/dispatch", async (request, reply) => {
   });
 
   return { ok: true, job: serializeJob(job) };
+});
+
+// Interactive review loop, Phase 0 (see .plans/interactive-review-loop.md):
+// starting a review, reading a round, leaving comments, confirming
+// checklist items, and closing a round's comment-leaving phase. No change
+// agent yet — that's Phase 1.
+app.get("/api/review", async () => ({ ok: true, reviews: listReviews() }));
+
+app.post("/api/review/start", async (request, reply) => {
+  const { repo, baseBranch, prUrl } = request.body || {};
+  if (!repo || typeof repo !== "string") {
+    reply.code(400);
+    return { ok: false, error: "repo is required" };
+  }
+  if (!baseBranch || typeof baseBranch !== "string") {
+    reply.code(400);
+    return { ok: false, error: "baseBranch is required" };
+  }
+  try {
+    const { id, round } = startReview({ repo, baseBranch, prUrl: prUrl || null });
+    return { ok: true, id, round };
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: err.message };
+  }
+});
+
+app.get("/api/review/:id", async (request, reply) => {
+  const session = getSession(request.params.id);
+  if (!session) {
+    reply.code(404);
+    return { ok: false, error: "Unknown review" };
+  }
+  const round = getRound(request.params.id, session.currentRound);
+  const comments = listComments(request.params.id, { round: session.currentRound });
+  return {
+    ok: true,
+    session,
+    round: round
+      ? {
+          round: round.round,
+          chunkCount: round.chunks.length,
+          checklistTotal: round.chunks.flatMap((c) => c.checklist).length,
+          checklistConfirmed: round.chunks.flatMap((c) => c.checklist).filter((k) => k.status === "confirmed").length,
+          openComments: comments.filter((c) => c.status === "open").length,
+        }
+      : null,
+  };
+});
+
+app.get("/api/review/:id/round/:n", async (request, reply) => {
+  const round = getRound(request.params.id, Number.parseInt(request.params.n, 10));
+  if (!round) {
+    reply.code(404);
+    return { ok: false, error: "Unknown round" };
+  }
+  const comments = listComments(request.params.id, { round: round.round });
+  return { ok: true, round, comments };
+});
+
+app.post("/api/review/:id/round/:n/comments", async (request, reply) => {
+  const round = Number.parseInt(request.params.n, 10);
+  const { chunkId, file, line, text } = request.body || {};
+  if (!text || typeof text !== "string" || !text.trim()) {
+    reply.code(400);
+    return { ok: false, error: "text is required" };
+  }
+  try {
+    const comment = addComment(request.params.id, round, { chunkId, file, line, text });
+    if (!comment) {
+      reply.code(404);
+      return { ok: false, error: "Unknown review or round" };
+    }
+    return { ok: true, comment };
+  } catch (err) {
+    reply.code(400);
+    return { ok: false, error: err.message };
+  }
+});
+
+app.post("/api/review/:id/round/:n/checklist/:k/confirm", async (request, reply) => {
+  const round = Number.parseInt(request.params.n, 10);
+  const updated = confirmChecklistItem(request.params.id, round, request.params.k);
+  if (!updated) {
+    reply.code(404);
+    return { ok: false, error: "Unknown review, round, or checklist item" };
+  }
+  return { ok: true, round: updated };
+});
+
+// Replaces the round's walk order. Validation (every chunk in exactly one
+// group) lives in review.js; a rejection comes back with missing /
+// duplicates / unknown chunk ids so the agent can fix its proposal.
+app.put("/api/review/:id/round/:n/groups", async (request, reply) => {
+  const round = Number.parseInt(request.params.n, 10);
+  const { groups } = request.body || {};
+  const result = setRoundGroups(request.params.id, round, groups);
+  if (!result.ok) reply.code(result.notFound ? 404 : 400);
+  return result;
+});
+
+app.post("/api/review/:id/comments/:commentId/resolution", async (request, reply) => {
+  const { status, note, files } = request.body || {};
+  const result = resolveComment(request.params.id, request.params.commentId, { status, note, files });
+  if (!result.ok) reply.code(result.notFound ? 404 : 400);
+  return result;
+});
+
+// Called by the change job once its round commit exists. Safe to call
+// twice: a round that already exists comes back unchanged.
+app.post("/api/review/:id/round/:n/next", async (request, reply) => {
+  const round = Number.parseInt(request.params.n, 10);
+  try {
+    const result = nextRound(request.params.id, round);
+    if (!result.ok) reply.code(result.notFound ? 404 : 400);
+    return result;
+  } catch (err) {
+    request.log.error(err, `Review ${request.params.id}: computing round ${round + 1} failed`);
+    reply.code(500);
+    return { ok: false, error: err.message };
+  }
+});
+
+app.post("/api/review/:id/round/:n/complete", async (request, reply) => {
+  const round = Number.parseInt(request.params.n, 10);
+  const { force } = request.body || {};
+  const result = completeRound(request.params.id, round, { force: Boolean(force) });
+  if (!result.ok) reply.code(400);
+  return result;
+});
+
+// Generic voice (see api/voice.js) — any agent, keyed by any id it
+// chooses (a reviewId, a jobId, anything), not tied to review.js or
+// run-command.js's own registries. Validated here rather than left to
+// voice.js, since server.js is the only place an id ever arrives as
+// untrusted route-param text rather than a server-generated UUID.
+app.post("/api/voice/:id/speak", async (request, reply) => {
+  if (!isValidVoiceId(request.params.id)) {
+    reply.code(400);
+    return { ok: false, error: "id must match [A-Za-z0-9_-]{1,128}" };
+  }
+  const { text } = request.body || {};
+  if (!text || typeof text !== "string" || !text.trim()) {
+    reply.code(400);
+    return { ok: false, error: "text is required" };
+  }
+  const result = speakVoice(request.params.id, text);
+  if (!result.ok) reply.code(400);
+  return result;
+});
+
+app.post("/api/voice/:id/hush", async (request, reply) => {
+  if (!isValidVoiceId(request.params.id)) {
+    reply.code(400);
+    return { ok: false, error: "id must match [A-Za-z0-9_-]{1,128}" };
+  }
+  const result = hushVoice(request.params.id);
+  if (!result.ok) reply.code(400);
+  return result;
 });
 
 // Pearl: ensures her persistent session exists (spawning it, briefed, on

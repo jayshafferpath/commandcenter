@@ -171,6 +171,8 @@ function syncJobsFromTmux() {
     jobs.set(id, {
       id,
       ticketKey: meta?.ticketKey ?? null,
+      reviewId: meta?.reviewId ?? null,
+      reviewRole: meta?.reviewRole ?? null,
       title: meta?.title ?? null,
       prompt: meta?.prompt ?? "(tmux session adopted — no local metadata)",
       cwd: meta?.cwd ?? null,
@@ -247,6 +249,8 @@ setInterval(pollRunningJobs, POLL_INTERVAL_MS);
 export function startCommandJob({
   id = randomUUID(),
   ticketKey,
+  reviewId = null,
+  reviewRole = null,
   title,
   prompt,
   cwd,
@@ -259,6 +263,8 @@ export function startCommandJob({
   const job = {
     id,
     ticketKey,
+    reviewId,
+    reviewRole,
     title,
     prompt,
     cwd,
@@ -274,7 +280,7 @@ export function startCommandJob({
   jobs.set(id, job);
 
   writeFileSync(promptFilePath(id), prompt, "utf-8");
-  writeMetaFile(id, { id, ticketKey, title, prompt, cwd, mode, startedAt: now });
+  writeMetaFile(id, { id, ticketKey, reviewId, reviewRole, title, prompt, cwd, mode, startedAt: now });
 
   try {
     execFileSync("tmux", [
@@ -329,6 +335,23 @@ export function findRunningJobForTicket(ticketKey) {
     // still block a second dispatch and still show the ticket row's
     // jump-to-session button instead of reverting to "spawn".
     if (job.ticketKey === ticketKey && (job.status === "running" || job.status === "needs_input")) {
+      return job;
+    }
+  }
+  return null;
+}
+
+// Same guard as findRunningJobForTicket, per review and role: a round closed
+// twice must not start two change agents committing to the same branch, but
+// the walkthrough that dispatches the change agent is itself still running
+// (interactive jobs stay running until closed), so roles can't share a slot.
+export function findRunningJobForReview(reviewId, role) {
+  for (const job of jobs.values()) {
+    if (
+      job.reviewId === reviewId &&
+      job.reviewRole === role &&
+      (job.status === "running" || job.status === "needs_input")
+    ) {
       return job;
     }
   }
