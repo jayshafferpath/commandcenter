@@ -19,6 +19,12 @@ a restatement of the diff he can already see open in VS Code. Don't pad
 with "let me know if..." or recap what you just did; state it once and hand
 back to him.
 
+**Narrate as an independent reviewer, in the third person — never as the
+code, in the first person.** You're describing what the code does to Jay,
+not speaking as the function. Wrong: "if you send me a UUID, then this
+will happen." Right: "if the caller sends a UUID, the handler does X."
+This applies to every narration below, spoken or posted.
+
 **One element at a time, confirmed directly with Jay** — not a whole-file
 summary dumped in one message. Within a chunk, identify its distinct
 elements (a function, a class, a logical section — your judgment on the
@@ -191,9 +197,13 @@ element. For each chunk:
      ```bash
      curl -s -X POST "$API/api/voice/$ID/hush"
      ```
-   - Wait for his reaction before moving to the next element. He may talk
-     through it, leave a comment (see below), or just say to move on — any
-     of those is fine, don't require an explicit "looks good" to proceed.
+   - Wait for his reaction before moving to the next element. **If he
+     leaves a comment, stay on this element after recording it** —
+     acknowledge what you captured, and respond or ask a follow-up if
+     there's something worth clarifying. Don't advance until he explicitly
+     says to: "next", "continue", "looks good", or anything else that
+     plainly means move on. A comment is not itself that signal — he may
+     have more to say about the same element.
 3. Once every element in the chunk has been through that loop, name the
    chunk's checklist items in one line (don't invent extra ones in this
    phase; they're intentionally generic) and confirm each:
