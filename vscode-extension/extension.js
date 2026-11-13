@@ -4,7 +4,13 @@
 // See .plans/vscode-walkthrough-bridge.md Phase A.
 import * as vscode from "vscode";
 import { ackCommand, connectWorkspace, discoverReview, pollCommands } from "./src/api-client.js";
-import { CARET_COLOR, SELECTION_COLOR, shouldShowPresence, toZeroBasedRange } from "./src/decorations.js";
+import {
+  CARET_COLOR,
+  findVisibleEditorIndex,
+  SELECTION_COLOR,
+  shouldShowPresence,
+  toZeroBasedRange,
+} from "./src/decorations.js";
 import { ambiguityKey, DISCOVERY_IDLE_MS, nextConnectionStep } from "./src/discovery.js";
 import { nextBackoffMs, shouldReveal } from "./src/followState.js";
 
@@ -179,8 +185,18 @@ async function applyCommand(command, folder) {
   }
 
   const uri = folder ? vscode.Uri.joinPath(folder.uri, command.file) : vscode.Uri.file(command.file);
-  const doc = await vscode.workspace.openTextDocument(uri);
-  const editor = await vscode.window.showTextDocument(doc, { preserveFocus: true, preview: false });
+  // The walkthrough skill already opened this file as a diff before sending the
+  // move; opening it again with showTextDocument puts a second, raw editor on top
+  // of that diff. If it's already visible anywhere — including as the modified
+  // side of a diff editor — decorate that one instead of opening a new tab.
+  const existingIndex = findVisibleEditorIndex(vscode.window.visibleTextEditors, uri.toString());
+  const editor =
+    existingIndex >= 0
+      ? vscode.window.visibleTextEditors[existingIndex]
+      : await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), {
+          preserveFocus: true,
+          preview: false,
+        });
 
   const zeroBased = toZeroBasedRange(command);
   const start = new vscode.Position(zeroBased.start.line, zeroBased.start.character);

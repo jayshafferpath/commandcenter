@@ -36,6 +36,15 @@ export function shouldShowPresence(command) {
   return command?.type === "move";
 }
 
+// A diff editor's modified side is its own entry in vscode.window.visibleTextEditors,
+// not just the plain-editor case — so this covers both "already open as a normal
+// tab" and "already open as the right-hand side of a diff" uniformly. Pure/testable
+// against plain {document: {uri: {toString}}} doubles; extension.js passes the real
+// vscode.window.visibleTextEditors array and a real uri.toString().
+export function findVisibleEditorIndex(visibleEditors, targetUriString) {
+  return visibleEditors.findIndex((editor) => editor.document?.uri?.toString() === targetUriString);
+}
+
 export function caretNameplate(command, fallbackLabel) {
   return command?.label || fallbackLabel;
 }

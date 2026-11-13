@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   caretNameplate,
+  findVisibleEditorIndex,
   normalizeRange,
   shouldShowPresence,
   toZeroBasedRange,
@@ -51,6 +52,29 @@ describe("shouldShowPresence", () => {
     expect(shouldShowPresence({ type: "clear" })).toBe(false);
     expect(shouldShowPresence(null)).toBe(false);
     expect(shouldShowPresence(undefined)).toBe(false);
+  });
+});
+
+describe("findVisibleEditorIndex", () => {
+  const editorFor = (uriString) => ({ document: { uri: { toString: () => uriString } } });
+
+  it("finds a plain editor showing the target uri", () => {
+    const editors = [editorFor("file:///a.ts"), editorFor("file:///b.ts")];
+    expect(findVisibleEditorIndex(editors, "file:///b.ts")).toBe(1);
+  });
+
+  it("finds the modified side of a diff editor showing the target uri", () => {
+    const editors = [editorFor("file:///base-snapshot.ts"), editorFor("file:///repo/b.ts")];
+    expect(findVisibleEditorIndex(editors, "file:///repo/b.ts")).toBe(1);
+  });
+
+  it("returns -1 when the target uri isn't visible anywhere", () => {
+    const editors = [editorFor("file:///a.ts")];
+    expect(findVisibleEditorIndex(editors, "file:///c.ts")).toBe(-1);
+  });
+
+  it("returns -1 for an empty editor list", () => {
+    expect(findVisibleEditorIndex([], "file:///a.ts")).toBe(-1);
   });
 });
 

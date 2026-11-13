@@ -204,7 +204,11 @@ element. For each chunk:
      SNAPSHOT="$SNAPSHOT_DIR/${CHUNK_ID}.${EXT}"
      git -C "<repo>" show "<round.baseSha>:<chunk.file>" > "$SNAPSHOT" 2>/dev/null
      if [ -s "$SNAPSHOT" ]; then
-       code -r --diff "$SNAPSHOT" "<repo>/<chunk.file>:<element's line>"
+       # --diff takes two plain paths, not <file>:<line> — only --goto parses
+       # that suffix. Passing it here opens the diff against a nonexistent
+       # path; the move call below (via Pair Pal) is what actually scrolls
+       # the diff to this element's line.
+       code -r --diff "$SNAPSHOT" "<repo>/<chunk.file>"
      else
        # New file in this branch — there's no base version to diff against,
        # so a diff view would just show an empty left side. Fall back to
