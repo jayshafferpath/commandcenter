@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,7 @@ const {
   clearCommand,
   connectVscode,
   getVscodeState,
+  getVscodeStatus,
   isSameRepoPath,
   matchWalkthroughForRepo,
   moveCommand,
@@ -210,10 +211,70 @@ describe("isSameRepoPath", () => {
     expect(isSameRepoPath("/repo", "/repo-two")).toBe(false);
     expect(isSameRepoPath("/repo/sub", "/repo")).toBe(false);
   });
+
+  it("falls back to resolve() when neither side exists on disk", () => {
+    expect(isSameRepoPath("/nonexistent/repo", "/nonexistent/repo/")).toBe(true);
+  });
+
+  describe("against a real directory", () => {
+    let realRepo;
+
+    beforeEach(() => {
+      realRepo = mkdtempSync(join(tmpdir(), "vscode-realpath-"));
+    });
+
+    afterEach(() => {
+      rmSync(realRepo, { recursive: true, force: true });
+    });
+
+    it("matches a trailing slash via realpath, same as resolve() alone did", () => {
+      expect(isSameRepoPath(realRepo, `${realRepo}/`)).toBe(true);
+    });
+
+    it("matches a symlinked checkout to its real path", () => {
+      const link = join(tmpdir(), `vscode-symlink-${Date.now()}`);
+      symlinkSync(realRepo, link);
+      try {
+        expect(isSameRepoPath(link, realRepo)).toBe(true);
+      } finally {
+        rmSync(link, { force: true });
+      }
+    });
+
+    it("still rejects a genuinely different real directory", () => {
+      const other = mkdtempSync(join(tmpdir(), "vscode-realpath-other-"));
+      try {
+        expect(isSameRepoPath(realRepo, other)).toBe(false);
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 describe("getVscodeState", () => {
   it("returns null before any connect", () => {
     expect(getVscodeState("rev-1")).toBeNull();
+  });
+});
+
+describe("getVscodeStatus", () => {
+  it("reports not connected, never throwing, before any connect", () => {
+    expect(getVscodeStatus("rev-1")).toEqual({
+      connected: false,
+      repo: null,
+      connectedAt: null,
+      lastSeenAt: null,
+    });
+  });
+
+  it("reports connected with the repo and timestamps once connected", () => {
+    const state = connectVscode("rev-1", "/repo");
+    expect(getVscodeStatus("rev-1")).toEqual({
+      connected: true,
+      repo: "/repo",
+      connectedAt: state.connectedAt,
+      lastSeenAt: state.lastSeenAt,
+    });
   });
 });

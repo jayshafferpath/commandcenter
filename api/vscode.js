@@ -15,7 +15,7 @@
 // wrong-workspace handling section.
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { STATES } from "./lib/review-fsm.js";
@@ -76,14 +76,43 @@ export function getVscodeState(id) {
   return readState(id);
 }
 
+// Cheap, read-only, never throws — unlike every other route here, the
+// caller (the walkthrough skill, right after it opens the repo folder in
+// VS Code) is specifically polling to find out whether Pair Pal has
+// connected *yet*, so "not connected" has to be a normal answer, not a 404
+// it has to catch.
+export function getVscodeStatus(id) {
+  const state = readState(id);
+  return {
+    connected: Boolean(state),
+    repo: state?.repo ?? null,
+    connectedAt: state?.connectedAt ?? null,
+    lastSeenAt: state?.lastSeenAt ?? null,
+  };
+}
+
 // Discovery and connect must agree on what "the same repo" means, or the
 // extension could discover a review it then can't connect to. resolve()
-// only absorbs a trailing slash or `..` segment — no realpath, since a
-// symlinked checkout is a different workspace as far as VS Code is
-// concerned too.
+// absorbs a trailing slash or `..` segment; realpathSync additionally
+// absorbs symlinks and the macOS /tmp-vs-/private/tmp split, since
+// `vscode.workspace.workspaceFolders[0].uri.fsPath` and the path
+// `/cc-review-walkthrough` opens a repo with (and that review.js stored as
+// session.repo) can resolve the same checkout through either form. Falls
+// back to the resolved-but-not-realpath'd value when the path doesn't
+// exist (tests use paths that aren't real directories; realpathSync throws
+// on those) rather than treating a nonexistent path as unresolvable.
+function normalizeRepoPath(path) {
+  const resolved = resolve(path);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export function isSameRepoPath(a, b) {
   if (!a || !b) return false;
-  return resolve(a) === resolve(b);
+  return normalizeRepoPath(a) === normalizeRepoPath(b);
 }
 
 // How Pair Pal finds its review without anyone setting

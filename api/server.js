@@ -30,6 +30,7 @@ import {
   ackCommand,
   clearCommand,
   connectVscode,
+  getVscodeStatus,
   matchWalkthroughForRepo,
   moveCommand,
   VscodeNotConnectedError,
@@ -254,6 +255,13 @@ app.get("/api/vscode/discover", async (request, reply) => {
     match: { reviewId: match.id, repo: match.repo, round: match.currentRound, jobId: job?.id ?? null },
     ambiguous,
   };
+});
+
+// Cheap and read-only — no 404 for "not connected yet," so the walkthrough
+// skill can poll this right after opening the repo folder in VS Code
+// without treating every miss as an error to catch.
+app.get("/api/vscode/:id/status", async (request, reply) => {
+  return { ok: true, ...getVscodeStatus(request.params.id) };
 });
 
 app.post("/api/vscode/:id/connect", async (request, reply) => {

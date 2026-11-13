@@ -88,6 +88,43 @@ If `round.completedAt` is already set, this round is closed — don't take
 new comments on it. Tell Jay; its change agent either is running or has
 already opened the next round (`GET /api/review/$ID` → `currentRound`).
 
+## Open the repo's own window before the first element
+
+Pair Pal discovers a review by matching the repo folder open in VS Code
+(`GET /api/vscode/discover`) — if the frontmost window happens to be some
+other repo's, Pair Pal in that window never sees this review, and every
+`move` 404s for the whole round. Fix that before narrating anything: open
+(or focus) the review's own repo as a VS Code window, using `GET
+/api/review/$ID` → `session.repo` as `<repo>`:
+
+```bash
+code "<repo>"
+```
+
+VS Code dedupes on folder — if a window for `<repo>` is already open, this
+just brings it to the front; otherwise it opens one. Either way, the
+window Pair Pal needs to be running in is now the most recently active one,
+which matters for the `-r`/`--reuse-window` calls below.
+
+Then give Pair Pal a short, bounded window to connect before presenting
+the first element — poll the status route, not `move`, so this never
+depends on there being a pending command to see:
+
+```bash
+for i in 1 2 3 4 5; do
+  CONNECTED=$(curl -s "$API/api/vscode/$ID/status" | jq -r '.connected')
+  [ "$CONNECTED" = "true" ] && break
+  sleep 1
+done
+```
+
+Five attempts, one second apart — about 5s worst case, not a blocking
+wait. If it never reports `connected: true`, tell Jay once, in a sentence
+("Pair Pal didn't connect this round — I'll keep using `code -g`/`--diff`
+to open each element"), and move on; don't retry later in the round and
+don't treat it as an error. The `code --diff`/`--goto` fallback below
+always fires regardless, so nothing actually blocks on this either way.
+
 ## Round 2 and later: outcomes first
 
 A round after the first is the diff since the previous round, plus
@@ -167,12 +204,12 @@ element. For each chunk:
      SNAPSHOT="$SNAPSHOT_DIR/${CHUNK_ID}.${EXT}"
      git -C "<repo>" show "<round.baseSha>:<chunk.file>" > "$SNAPSHOT" 2>/dev/null
      if [ -s "$SNAPSHOT" ]; then
-       code --diff "$SNAPSHOT" "<repo>/<chunk.file>:<element's line>"
+       code -r --diff "$SNAPSHOT" "<repo>/<chunk.file>:<element's line>"
      else
        # New file in this branch — there's no base version to diff against,
        # so a diff view would just show an empty left side. Fall back to
        # opening the file itself at this element's line.
-       code --goto "<repo>/<chunk.file>:<element's line>"
+       code -r --goto "<repo>/<chunk.file>:<element's line>"
      fi
      ```
      `<repo>` is the review's `repo` path and `<round.baseSha>` is the
@@ -180,7 +217,12 @@ element. For each chunk:
      is plain VS Code CLI (`code --diff`/`--goto`), not anything
      Claude-specific — it requires the `code` shell command to be on PATH
      (if the command isn't found, say so plainly rather than silently
-     skipping the open).
+     skipping the open). Always pass `-r`/`--reuse-window`: without it,
+     every call can open a fresh window of its own, and whichever window
+     ends up frontmost becomes a coin flip. `-r` forces the open into the
+     most recently active window instead — the review's own, since you
+     opened/focused it with plain `code "<repo>"` above and nothing else in
+     this loop opens an unrelated window in between.
 
      Alongside it — never instead of it — also tell Pair Pal (the VS Code
      extension, if Jay has it installed) where you are, so its own

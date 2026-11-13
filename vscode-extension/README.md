@@ -46,7 +46,11 @@ code --install-extension pair-pal.vsix
 With no `sessionId` set, Pair Pal polls `GET /api/vscode/discover?repo=<the
 workspace's first folder>` every couple of seconds. The API answers with
 the one review whose state is `walkthrough_in_progress` and whose `repo`
-matches that folder, and Pair Pal connects to it on its own.
+matches that folder, and Pair Pal connects to it on its own. The repo
+comparison (`isSameRepoPath` in `api/vscode.js`) normalizes both sides with
+`realpath`, not just a trailing slash — so a worktree opened through a
+symlink, or a macOS `/tmp` vs `/private/tmp` path, still matches the repo
+path `review.js` stored.
 
 - **No match**: stays idle and keeps checking.
 - **Several matches** (two walkthroughs on one repo): connects to none,
@@ -63,7 +67,13 @@ refuses to advance a round on a dirty tree.
 
 Until discovery connects, the agent's `move` calls 404, so the first
 element or two of a walkthrough can go by without a presence marker. The
-`code --diff`/`--goto` fallback still opens each one.
+`code --diff`/`--goto` fallback still opens each one. `GET
+/api/vscode/:id/status` (`{ connected, repo, connectedAt, lastSeenAt }`,
+never a 404) exists so the walkthrough skill can poll for exactly this —
+it opens the repo folder in VS Code itself at the start of a round, then
+gives Pair Pal a few seconds to connect before presenting the first
+element, instead of narrating blind into whatever window happened to be
+frontmost.
 
 ## Manual smoke checklist
 
